@@ -8,7 +8,7 @@
 #include <max44009.h>
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_INTR_IO            17
+#define GPIO_INTR_IO            5
 #define ESP_INTR_FLAG_DEFAULT   0
   
 SemaphoreHandle_t xSemaphore = NULL;
