@@ -312,29 +312,32 @@ void gp2y1014au0f_read()
     int voltage;
     float dustDensity;
 
-    gpio_set_level(GPIO_LED_CONTROL, 0);
-    // printf("GPIO_25 set low\n");
-    ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
-    
-    // printf("analog_read start\n");
-    voltage = analog_read();
-    // printf("analog_read end\n");
+    while(1)
+    {
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_LED_CONTROL, 0);
+        // printf("GPIO_25 set low\n");
+        ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
+        
+        // printf("analog_read start\n");
+        voltage = analog_read();
+        // printf("analog_read end\n");
 
-    ets_delay_us(GP2Y_DELTA_TIME);
-    // printf("delay delta finished\n");
-    
-    gpio_set_level(GPIO_LED_CONTROL, 1);
-    // printf("GPIO_25 set high\n");
-    ets_delay_us(GP2Y_SLEEP_TIME);
+        ets_delay_us(GP2Y_DELTA_TIME);
+        // printf("delay delta finished\n");
+        
+        gpio_set_level(GPIO_LED_CONTROL, 1);
+        // printf("GPIO_25 set high\n");
+        ets_delay_us(GP2Y_SLEEP_TIME);
 
-    // printf("delay sleep finished\n");
+        // printf("delay sleep finished\n");
 
-    dustDensity = 0.17 * voltage / 1000 - 0.1;
+        dustDensity = 0.17 * voltage / 1000 - 0.1;
 
-    if (dustDensity < 0) dustDensity = 0;
+        if (dustDensity < 0) dustDensity = 0;
 
-    printf("Dust Density: %.2f mg/m3\n", dustDensity);
-
+        printf("Dust Density: %.2f mg/m3\n", dustDensity);
+    }
 }
 
 void app_main()
