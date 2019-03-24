@@ -13,7 +13,7 @@
 
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_INTR_IO            17  // INTR pin for max44009
+#define GPIO_INTR_IO            5  // INTR pin for max44009
 #define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
 
