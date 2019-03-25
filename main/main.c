@@ -16,10 +16,10 @@
 #define GPIO_INTR_IO            5  // INTR pin for max44009
 #define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
-
+#define GPIO_UV_EN              0
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
-#define NO_OF_SAMPLES       2          //Multisampling
+#define NO_OF_SAMPLES       8          //Multisampling
 
 // gp2y time define in microsecoend !
 #define GP2Y_SAMPLE_TIME    280
@@ -38,7 +38,8 @@ max44009_t dev_m;
 
 // adc
 static esp_adc_cal_characteristics_t *adc_chars;
-static const adc_channel_t channel = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
+static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
+static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO34
 static const adc_atten_t atten = ADC_ATTEN_DB_11;
 static const adc_unit_t unit = ADC_UNIT_1;
 
@@ -82,7 +83,7 @@ static void print_char_val_type(esp_adc_cal_value_t val_type)
  * static esp_adc_cal_characteristics_t *adc_chars;
  * static const adc_channel_t channel = ADC_CHANNEL_6;
  */
-uint32_t analog_read()
+uint32_t analog_read(adc_channel_t channel)
 {
     uint32_t adc_reading = 0;
     //Multisampling
@@ -110,9 +111,10 @@ void init_adc()
     //Configure ADC
     if (unit == ADC_UNIT_1) {
         adc1_config_width(ADC_WIDTH_BIT_12);
-        adc1_config_channel_atten(channel, atten);
+        adc1_config_channel_atten(channel1, atten);
+        adc1_config_channel_atten(channel2, atten);
     } else {
-        adc2_config_channel_atten((adc2_channel_t)channel, atten);
+        // adc2_config_channel_atten((adc2_channel_t)channel, atten);
     }
 
     //Characterize ADC
@@ -146,7 +148,7 @@ void init_gpio()
     //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_LED_CONTROL);
+    io_conf.pin_bit_mask = (1ULL << GPIO_LED_CONTROL | GPIO_UV_EN);
     //disable pull-down mode
     io_conf.pull_down_en = 0;
     //disable pull-up mode
@@ -158,6 +160,7 @@ void init_gpio()
 
 void init_bme280()
 {
+    // bmp280_init_default_params(&params_b);
     bmp280_init_weather_params(&params_b);   
     
     while (bmp280_init_desc(&dev_b, BMP280_I2C_ADDRESS_0, 0, SDA_GPIO, SCL_GPIO) != ESP_OK)
@@ -320,7 +323,7 @@ void gp2y1014au0f_read()
         ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
         
         // printf("analog_read start\n");
-        voltage = analog_read();
+        voltage = analog_read(channel1);
         // printf("analog_read end\n");
 
         ets_delay_us(GP2Y_DELTA_TIME);
@@ -337,6 +340,36 @@ void gp2y1014au0f_read()
         if (dustDensity < 0) dustDensity = 0;
 
         printf("Dust Density: %.2f mg/m3\n", dustDensity);
+    }
+}
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
+{
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void ml8511_read()
+{
+    int uvLevel;//, refLevel;
+
+    float outputVoltage, uvIntensity;
+    while(1)
+    {
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_UV_EN, 1);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+
+        uvLevel = analog_read(channel2);
+        // refLevel = analog_read(channel3);
+
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_UV_EN, 0);
+
+        // outputVoltage = 3.3 / refLevel * uvLevel;
+        outputVoltage = 3.3 / 4095 * uvLevel;
+
+        uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
+
+        printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
     }
 }
 
@@ -357,7 +390,8 @@ void app_main()
 
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
     
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
