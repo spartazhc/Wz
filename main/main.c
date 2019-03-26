@@ -47,7 +47,6 @@ char is_message_in_str(const char* data, const char* str)
 }
 int count_comma(const char* str, int n);
 void mystrcpy(const char *src, char* dst, int n);
-void mystrTrip(char* str);
 void float2char(float slope, char* buffer);
 
 void init_gpio();
@@ -232,15 +231,13 @@ void init_doiot()
     uart_sendstring(UART_NUM_1, "AT+MIPLCREATE\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 新增object id:3303(temperature)
-    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
-    // vTaskDelay(100 / portTICK_PERIOD_MS);
-    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
-    // vTaskDelay(100 / portTICK_PERIOD_MS);
-    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
-    // vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n");
-
-
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
@@ -267,11 +264,11 @@ void bmp280_read()
 
         printf("Pres: %.2f Pa, Temp: %.2f C, Hum: %.2f%%\n", pressure, temperature, humidity);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        // if (doiot.discover_count >= 2) {
+        if (doiot.discover_count >= 4) {
             obj[1].value = temperature;
             obj[2].value = humidity;
             obj[3].value = pressure;
-        // }
+        }
         
         
     }
@@ -305,10 +302,9 @@ void max44009_task()
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
-                // if (doiot.discover_count >= 2) {
-                obj[0].value = lux_f;
-                    // doiot.upload_en = 1;
-                // }
+                if (doiot.discover_count >= 4) {
+                    obj[0].value = lux_f;
+                }
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
                 {
                     printf("Threshold setting failed\n");
@@ -388,7 +384,6 @@ void mystrcpy(const char *src, char* dst, int n)
     size_t i = 0;
     // printf("l = %d\n", l);
 	++l;
-    // while (src[l] <= '9' && src[l] >= '0'){
     while (src[l] != '\0'){
         if (src[l] == ',') break;
         dst[i] = src[l];
@@ -399,15 +394,6 @@ void mystrcpy(const char *src, char* dst, int n)
     dst[i] = '\0';
 }
 
-void mystrTrip(char* str)
-{
-    // int i = 0;
-    // int flag = 0;
-    // while(str[i] >= '0'){
-    //     /* code */
-    // }
-    
-}
 /**
  * keep 2 mantissa
  */
@@ -450,43 +436,18 @@ void doiot_getevent(const char * data)
     char tmp[10];
     // char tmp2[10];
     // char cmd[80];
-    // int flag = 3;
-    //doiot_event_t* doiot = get_doiot();
     if (is_message_in_str(data, "MIPLDISCOVER")) {
         // +MIPLDISCOVER: 0, 15321, 3303
         mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
-        tmp[4] = '\0';
-        // printf("obj_id = |%s|", tmp); //ok
-        // mystrcpy(data, tmp2, 1);
+        tmp[4] = '\0'; // manually set '\0'
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            // flag = strcmp(tmp, obj[i].id);
-            // printf("|flag = {%d}|\n", flag);
-            // printf("in for loop\n");
-            // printf("obj_id0 = |%s|\n", obj[0].id);
-            // printf("obj_idi = |%s|\n", obj[i].id);
-            // printf("tmp = |%s|\n", tmp);
-            // printf("obj_id = %d\n", (obj[i].id == tmp));
-            if (!strcmp(tmp, obj[i].id)){ //&& !obj[i].discover) {
+            if (!strcmp(tmp, obj[i].id)&& !obj[i].discover) {
                 // doiot object operation
-                // printf("index \n");
-                obj[i].discover = 1;
+                obj[i].discover = 1;    
                 mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_DISCOVER;
-                // printf("msgid = %s", tmp);
-                //// strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-                //// strcat(cmd, tmp2);
-                //// strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
-                // uart_sendstring(UART_NUM_0, cmd);
-                // vTaskDelay(100 / portTICK_PERIOD_MS);
-                ////uart_sendstring(UART_NUM_1, cmd);
-                // printf("cmd = %s", cmd);
-                // doiot.event = DOIOT_NORMAL;
-                // doiot.cur_obj = -1;
-                // doiot.discover_count++;
-                ////vTaskDelay(100 / portTICK_PERIOD_MS);
-                // printf("end index = %u\n", i);
                 break;
             }
         }
@@ -497,7 +458,7 @@ void doiot_getevent(const char * data)
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
             // printf("tmp = |%s|", tmp);
             // printf("obj_id = |%s|", obj[i].id);
-            if (!strcmp(tmp, obj[i].id) ){//&& !obj[i].observe) {
+            if (!strcmp(tmp, obj[i].id)&& !obj[i].observe) {
                 // doiot object operation
                 obj[i].observe = 1;
                 mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
@@ -539,11 +500,9 @@ void doiot_response(const char* data)
             strcat(cmd, obj[doiot.cur_obj].msgid_observe);
             strcat(cmd, ",1\r\n");
             uart_sendstring(UART_NUM_1, cmd);
-            // vTaskDelay(100 / portTICK_PERIOD_MS);
-            // uart_sendstring(UART_NUM_0, cmd);
             doiot.event = DOIOT_NORMAL;
             // doiot.cur_obj = -1;
-            // doiot.observe_count++;
+            doiot.observe_count++;
             vTaskDelay(100 / portTICK_PERIOD_MS);
             break;
             // AT+MIPLOBSERVERSP=0, ,1
@@ -552,12 +511,10 @@ void doiot_response(const char* data)
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
             strcat(cmd, obj[doiot.cur_obj].msgid_discover);
             strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
-            // uart_sendstring(UART_NUM_0, cmd);
-            // vTaskDelay(100 / portTICK_PERIOD_MS);
             uart_sendstring(UART_NUM_1, cmd);
             doiot.event = DOIOT_NORMAL;
             // doiot.cur_obj = -1;
-            // doiot.discover_count++;
+            doiot.discover_count++;
             vTaskDelay(100 / portTICK_PERIOD_MS);
             break;
         case DOIOT_IP_CONNECTED:
@@ -599,22 +556,11 @@ void uart_forward()
                 vTaskDelay(5000 / portTICK_PERIOD_MS);
                 gpio_set_level(GPIO_PWR_DOIOT, 0);
             }
-            // } else if (is_message_in_str((const char *)data0, "close")) {
-            //     uart_sendstring(UART_NUM_1, "AT+MIPDISCOVER=0\r\n");
-            //     // free(doiot);
-            //     // for (size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            //     //     free(obj[i]);
-            //     // }
-                
-            //     // init_doiot();
-            // }
             uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to doiot
         }
         if (len1 > 0) {//receive from doiot
             // printf("uart1[R]: %d\n", len1);
             // deal with response from doiot
-            //
-            // uart_write_bytes(UART_NUM_0, u_doiot, 7);
             uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
 
             // once receive data from doiot, process the data;
@@ -634,11 +580,11 @@ void doiot_upload()
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        // if (!doiot.upload_en && doiot.discover_count == 4) {
-        //     doiot.upload_en = 1;
-        // }
-        
-        if (doiot.flag_miplopen){ //&& doiot.upload_en) {
+        if (!doiot.upload_en && doiot.discover_count == 4) {
+            doiot.upload_en = 1;
+            printf("init success & upload enable\n")
+        }
+        if (doiot.flag_miplopen && doiot.upload_en) {
             
             for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
             {
