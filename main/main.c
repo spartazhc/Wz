@@ -22,7 +22,8 @@
 #define ECHO_TEST_CTS  (UART_PIN_NO_CHANGE)
 #define BUF_SIZE (1024)
 
-#define DOIOT_OBJ_NUM 4
+extern doiot_obj_t obj[DOIOT_OBJ_NUM];
+extern doiot_event_t doiot;
 SemaphoreHandle_t xSemaphore = NULL;
 bmp280_params_t params_b;
 max44009_params_t params_m;
@@ -52,13 +53,13 @@ void init_gpio();
 void init_uart();
 void init_bme280();
 void init_max44009();
-void init_doiot(doiot_event_t * doiot);
-void bmp280_read(doiot_obj_t* obj);
-void max44009_task(doiot_obj_t* obj);
-void doiot_getevent(const char * data, doiot_event_t * doiot, doiot_obj_t * obj);
-void doiot_response(const char * data, doiot_event_t * doiot, doiot_obj_t * obj);
-void uart_forward(doiot_event_t * doiot, doiot_obj_t* obj);
-void doiot_upload(doiot_event_t * doiot, doiot_obj_t* obj);
+void init_doiot();
+void bmp280_read();
+void max44009_task();
+void doiot_getevent(const char * data);
+void doiot_response(const char * data);
+void uart_forward();
+void doiot_upload();
 // void max44009_read(void *pvParameters);
 // void max44009_th_test(void *pvParameters);
 
@@ -66,14 +67,7 @@ void doiot_upload(doiot_event_t * doiot, doiot_obj_t* obj);
 
 void app_main()
 {
-    // doiot init
-    doiot_event_t* doiot = doiot_event();
-    const char* obj_list[DOIOT_OBJ_NUM] = {"3301", "3303", "3304", "3323"};
-	doiot_obj_t* obj[DOIOT_OBJ_NUM];
-	for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
-	{
-		obj[i] = doiot_obj(obj_list[i]);
-	}
+    // //doiot_event_t* doiot = get_doiot();
 
     // create the binary semaphore
 	xSemaphore = xSemaphoreCreateBinary();
@@ -88,10 +82,10 @@ void app_main()
     init_bme280();
     init_max44009();
     // initiate doiot after start uart_forward task ()
-    init_doiot(doiot_event_t * doiot);
+    init_doiot();
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(doiot_upload, "doiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(doiot_upload, "doiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	
@@ -199,16 +193,19 @@ void init_max44009()
     }
 }
 
-void init_doiot(doiot_event_t* doiot)
+void init_doiot()
 {   
-
+    //doiot_event_t* doiot = get_doiot();
     // power doiot
     gpio_set_level(GPIO_PWR_DOIOT, 1);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     gpio_set_level(GPIO_PWR_DOIOT, 0);
     printf("Doiot System Start.\r\n");
     // wait until internet connect success
-    while (!doiot->flag_ip){vTaskDelay(100 / portTICK_PERIOD_MS);}
+    while (!doiot.flag_ip){
+        vTaskDelay(1000 / portTICK_PERIOD_MS); 
+        // printf("flag_ip = %d\n", doiot.flag_ip);
+    }
     vTaskDelay(100 / portTICK_PERIOD_MS);
     
     // 提示符
@@ -235,24 +232,27 @@ void init_doiot(doiot_event_t* doiot)
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 新增object id:3303(temperature)
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n");
 
 
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
-    while (!doiot->flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
+    while (!doiot.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // vTaskDelay(60 * 1000 / portTICK_PERIOD_MS);
 }
-void bmp280_read(doiot_obj_t* obj)
+void bmp280_read()
 {
     float pressure=0, temperature=0, humidity=0;
     while (1)
     {
-        vTaskDelay(2000  / portTICK_PERIOD_MS);
+        vTaskDelay(20*1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
@@ -266,14 +266,18 @@ void bmp280_read(doiot_obj_t* obj)
 
         printf("Pres: %.2f Pa, Temp: %.2f C, Hum: %.2f%%\n", pressure, temperature, humidity);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        obj[1]->value = temperature;
-        obj[2]->value = humidity;
-        obj[3]->value = pressure;
+        // if (doiot.discover_count >= 2) {
+            obj[1].value = temperature;
+            obj[2].value = humidity;
+            obj[3].value = pressure;
+        // }
+        
+        
     }
 }
 
 // task  will react to button clicks
-void max44009_task(doiot_obj_t* obj) 
+void max44009_task() 
 {
 	uint8_t intr_status;
     float lux_f = 0;
@@ -300,7 +304,10 @@ void max44009_task(doiot_obj_t* obj)
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
-                obj[0]->value = lux_f;
+                // if (doiot.discover_count >= 2) {
+                obj[0].value = lux_f;
+                    // doiot.upload_en = 1;
+                // }
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
                 {
                     printf("Threshold setting failed\n");
@@ -404,8 +411,10 @@ void float2char(float slope, char* buffer)  //浮点型数，存储的字符数�
     for(i = 0; temp != 0; i++)//计算整数部分的位数
         temp /= 10;
     temp =(int)slope;
-    i--;
-    printf("i = %d", i);
+    if (i > 0) {
+       i--;
+    }
+    // printf("i = %d", i);
     for(j = i; j >= 0; j--)//将整数部分转换成字符串型
     {
         buffer[j] = temp % 10 + '0';
@@ -424,83 +433,96 @@ void float2char(float slope, char* buffer)  //浮点型数，存储的字符数�
     buffer[i + k] = '\0';
 }
 
-char is_message_in_str(const char* data, const char* str)
+void doiot_getevent(const char * data)
 {
-    return (strstr(data, str) - data) > 0 ? 1 : 0;
-}
-
-void doiot_getevent(const char * data, doiot_event_t* doiot, doiot_obj_t* obj)
-{
-    char[10] tmp;
-
-    if (is_message_in_str(data, "MIPLOBSERVE")) {
-        //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
-        mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
+    char tmp[10];
+    //doiot_event_t* doiot = get_doiot();
+    if (is_message_in_str(data, "MIPLDISCOVER")) {
+        // +MIPLDISCOVER: 0, 15321, 3303
+        mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
+        //ok
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            if (!strcmp(tmp, obj[i]->id && !obj[i]->observe) {
+            if (!strcmp(tmp, obj[i].id)){ //&& !obj[i].discover) {
                 // doiot object operation
-                obj[i]->observe = 1;
-                mystrcpy(data, obj[i]->msgid_observe, 1);// copy msgid to object
+                obj[i].discover = 1;
+                mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
                 // doiot event operation
-                doiot->cur_obj = i; // save cur obj index
-                doiot->event = DOIOT_OBSERVE;
+                doiot.cur_obj = i; // save cur obj index
+                doiot.event = DOIOT_DISCOVER;
                 break;
             }
         }
-    } else (is_message_in_str(data, "MIPLOBSERVE")) {
-        // +MIPLDISCOVER: 0, 15321, 3303
-        mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
+    } else if (is_message_in_str(data, "MIPLOBSERVE")) {
+        //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
+        mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            if (!strcmp(tmp, obj[i]->id && !obj[i]->discover) {
+            if (!strcmp(tmp, obj[i].id) ){//&& !obj[i].observe) {
                 // doiot object operation
-                obj[i]->discover = 1;
-                mystrcpy(data, obj[i]->msgid_discover, 1);// copy msgid to object
+                obj[i].observe = 1;
+                mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
                 // doiot event operation
-                doiot->cur_obj = i; // save cur obj index
-                doiot->event = DOIOT_DISCOVER;
+                doiot.cur_obj = i; // save cur obj index
+                doiot.event = DOIOT_OBSERVE;
                 break;
             }
         }
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
-        doiot->event = DOIOT_REG_SUCCESS;
+        doiot.event = DOIOT_REG_SUCCESS;
+        return;
     } else if (is_message_in_str(data, "+IP:")) {
-        doiot->event = DOIOT_IP_CONNECTED;
+        doiot.event = DOIOT_IP_CONNECTED;
+        return;
+        // printf("event: get_ip\n");
     } else {
-        doiot->event = DOIOT_NORMAL;    // set to DOIOT_NORMAL
+        doiot.event = DOIOT_NORMAL;    // set to DOIOT_NORMAL
+        return;
     }
     return;   
 }
 //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
 // +MIPLDISCOVER: 0, 15321, 3303
-void doiot_response(const char* data, doiot_event_t* doiot, doiot_obj_t* obj)
+void doiot_response(const char* data)
 {
     // const char* miplobserve = "MIPLOBSERVE";
-    char cmd[50];
+    char cmd[80];
+    //doiot_event_t* doiot = get_doiot();
 
-    switch (doiot->event)
+    switch (doiot.event)
     {
         case DOIOT_NORMAL:
             break;
         // when RSP, only msgid is needed
         case DOIOT_OBSERVE:
             strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
-            strcat(cmd, obj[doiot->cur_obj]->msgid_observe);
+            strcat(cmd, obj[doiot.cur_obj].msgid_observe);
             strcat(cmd, ",1\r\n");
             uart_sendstring(UART_NUM_1, cmd);
+            // vTaskDelay(100 / portTICK_PERIOD_MS);
+            // uart_sendstring(UART_NUM_0, cmd);
+            doiot.event = DOIOT_NORMAL;
+            // doiot.cur_obj = -1;
+            // doiot.observe_count++;
             vTaskDelay(100 / portTICK_PERIOD_MS);
             break;
+            // AT+MIPLOBSERVERSP=0, ,1
+            // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
         case DOIOT_DISCOVER:
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-            strcat(cmd, obj[doiot->cur_obj]->msgid_discover);
-            strcat(cmd, ",1,15,\"5700;5601;5602\"\r\n"); // specific attribute for object
+            strcat(cmd, obj[doiot.cur_obj].msgid_discover);
+            strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
+            // uart_sendstring(UART_NUM_0, cmd);
+            // vTaskDelay(100 / portTICK_PERIOD_MS);
             uart_sendstring(UART_NUM_1, cmd);
+            doiot.event = DOIOT_NORMAL;
+            // doiot.cur_obj = -1;
+            // doiot.discover_count++;
             vTaskDelay(100 / portTICK_PERIOD_MS);
             break;
         case DOIOT_IP_CONNECTED:
-            doiot->flow_ctrl = 1;
+            doiot.flag_ip = 1;
             break;
         case DOIOT_REG_SUCCESS:
-            doiot->flag_miplopen = 1;
+            doiot.flag_miplopen = 1;
             break;
         default:
             break;
@@ -512,7 +534,7 @@ void doiot_response(const char* data, doiot_event_t* doiot, doiot_obj_t* obj)
  * uart0:   pc  -- esp32
  * uart1: esp32 -- doiot
  */
-void uart_forward(doiot_event_t* doiot, doiot_obj_t* obj)
+void uart_forward()
 {
     // Configure a temporary buffer for the incoming data
     uint8_t *data0 = (uint8_t *) malloc(BUF_SIZE);
@@ -521,6 +543,7 @@ void uart_forward(doiot_event_t* doiot, doiot_obj_t* obj)
     // const char *u_doiot = {"doiot: "};
     printf("init\n");
     while (1) {
+        vTaskDelay(10 / portTICK_PERIOD_MS);
         // Read data from the UART0
         int len0 = uart_read_bytes(UART_NUM_0, data0, BUF_SIZE, 20 / portTICK_RATE_MS);
         int len1 = uart_read_bytes(UART_NUM_1, data1, BUF_SIZE, 20 / portTICK_RATE_MS);
@@ -528,19 +551,20 @@ void uart_forward(doiot_event_t* doiot, doiot_obj_t* obj)
         if (len0 > 0) {//receve from pc
             uart_write_bytes(UART_NUM_0, u_esp32, 8);
             uart_write_bytes(UART_NUM_0, (const char *) data0, len0);    //display back
-            if (is_message_in_str((const char *)data0, "shut")) {
-                uart_sendstring(UART_NUM_1, "AT+MIPLCLOSE=0\r\n"); // MIPLCLOSE first
-                gpio_set_level(GPIO_PWR_DOIOT, 1);
-                vTaskDelay(5000 / portTICK_PERIOD_MS);
-                gpio_set_level(GPIO_PWR_DOIOT, 0);
-            } else if (is_message_in_str((const char *)data0, "reset")) {
-                // free(doiot);
-                // for (size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-                //     free(obj[i]);
-                // }
+            // if (is_message_in_str((const char *)data0, "shut")) {
+            //     uart_sendstring(UART_NUM_1, "AT+MIPLCLOSE=0\r\n"); // MIPLCLOSE first
+            //     gpio_set_level(GPIO_PWR_DOIOT, 1);
+            //     vTaskDelay(5000 / portTICK_PERIOD_MS);
+            //     gpio_set_level(GPIO_PWR_DOIOT, 0);
+            // } else if (is_message_in_str((const char *)data0, "close")) {
+            //     uart_sendstring(UART_NUM_1, "AT+MIPDISCOVER=0\r\n");
+            //     // free(doiot);
+            //     // for (size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+            //     //     free(obj[i]);
+            //     // }
                 
-                // init_doiot();
-            }
+            //     // init_doiot();
+            // }
             uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to doiot
         }
         if (len1 > 0) {//receive from doiot
@@ -551,34 +575,39 @@ void uart_forward(doiot_event_t* doiot, doiot_obj_t* obj)
             uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
 
             // once receive data from doiot, process the data;
-            doiot_getevent((const char *) data1, doiot, obj);
-            doiot_response((const char *) data1, doiot, obj);
+            doiot_getevent((const char *) data1);
+            doiot_response((const char *) data1);
         }
     }
 }
 
-void doiot_upload(doiot_event_t* doiot, doiot_obj_t* obj)
+void doiot_upload()
 {
     char cmd[50];
-    // char buf[10];
-
+    char buf[10];
+    //doiot_event_t* doiot = get_doiot();
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        if (doiot->flag_miplopen) {
+        if (!doiot.upload_en && doiot.discover_count == 4) {
+            doiot.upload_en = 1;
+        }
+        
+        if (doiot.flag_miplopen && doiot.upload_en) {
             
             for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
             {
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
                 strcpy(cmd, "AT+MIPLNOTIFY=0,");
-                strcat(cmd, obj[i]->msgid_observe);
+                strcat(cmd, obj[i].msgid_observe);
                 strcat(cmd, ",");
-                strcat(cmd, obj[i]->id);
+                strcat(cmd, obj[i].id);
                 strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
                 // float2char(num_test, buf);
                 // printf("num = %.2f, buf = %s \n", num_test, buf);
-                strcat(cmd, obj[i]->value);
+                float2char(obj[i].value, buf);
+                strcat(cmd, buf);
                 strcat(cmd, ",0,0\r\n"); // next time try config index bit
                 printf("%s", cmd);
                 uart_sendstring(UART_NUM_1, cmd);
