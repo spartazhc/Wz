@@ -47,6 +47,7 @@ char is_message_in_str(const char* data, const char* str)
 }
 int count_comma(const char* str, int n);
 void mystrcpy(const char *src, char* dst, int n);
+void mystrTrip(char* str);
 void float2char(float slope, char* buffer);
 
 void init_gpio();
@@ -74,17 +75,17 @@ void app_main()
     init_gpio();
     init_uart();
     xTaskCreate(uart_forward, "uart_forward", 1024, NULL, 10, NULL);
-    while (i2cdev_init() != ESP_OK)
-    {
-        printf("Could not init I2Cdev library\n");
-        vTaskDelay(250 / portTICK_PERIOD_MS);
-    }
-    init_bme280();
-    init_max44009();
+    // while (i2cdev_init() != ESP_OK)
+    // {
+    //     printf("Could not init I2Cdev library\n");
+    //     vTaskDelay(250 / portTICK_PERIOD_MS);
+    // }
+    // init_bme280();
+    // init_max44009();
     // initiate doiot after start uart_forward task ()
     init_doiot();
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(doiot_upload, "doiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
@@ -231,12 +232,12 @@ void init_doiot()
     uart_sendstring(UART_NUM_1, "AT+MIPLCREATE\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 新增object id:3303(temperature)
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
+    // vTaskDelay(100 / portTICK_PERIOD_MS);
+    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
+    // vTaskDelay(100 / portTICK_PERIOD_MS);
+    // uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
+    // vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n");
 
 
@@ -385,17 +386,28 @@ void mystrcpy(const char *src, char* dst, int n)
 {
     int l = count_comma(src, n);
     size_t i = 0;
-
+    // printf("l = %d\n", l);
 	++l;
+    // while (src[l] <= '9' && src[l] >= '0'){
     while (src[l] != '\0'){
         if (src[l] == ',') break;
         dst[i] = src[l];
         ++i;
         ++l;
     }
+    // printf("i = %u\n", i);
     dst[i] = '\0';
 }
 
+void mystrTrip(char* str)
+{
+    // int i = 0;
+    // int flag = 0;
+    // while(str[i] >= '0'){
+    //     /* code */
+    // }
+    
+}
 /**
  * keep 2 mantissa
  */
@@ -436,30 +448,60 @@ void float2char(float slope, char* buffer)  //浮点型数，存储的字符数�
 void doiot_getevent(const char * data)
 {
     char tmp[10];
+    // char tmp2[10];
+    // char cmd[80];
+    // int flag = 3;
     //doiot_event_t* doiot = get_doiot();
     if (is_message_in_str(data, "MIPLDISCOVER")) {
         // +MIPLDISCOVER: 0, 15321, 3303
         mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
-        //ok
+        tmp[4] = '\0';
+        // printf("obj_id = |%s|", tmp); //ok
+        // mystrcpy(data, tmp2, 1);
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+            // flag = strcmp(tmp, obj[i].id);
+            // printf("|flag = {%d}|\n", flag);
+            // printf("in for loop\n");
+            // printf("obj_id0 = |%s|\n", obj[0].id);
+            // printf("obj_idi = |%s|\n", obj[i].id);
+            // printf("tmp = |%s|\n", tmp);
+            // printf("obj_id = %d\n", (obj[i].id == tmp));
             if (!strcmp(tmp, obj[i].id)){ //&& !obj[i].discover) {
                 // doiot object operation
+                // printf("index \n");
                 obj[i].discover = 1;
                 mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_DISCOVER;
+                // printf("msgid = %s", tmp);
+                //// strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
+                //// strcat(cmd, tmp2);
+                //// strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
+                // uart_sendstring(UART_NUM_0, cmd);
+                // vTaskDelay(100 / portTICK_PERIOD_MS);
+                ////uart_sendstring(UART_NUM_1, cmd);
+                // printf("cmd = %s", cmd);
+                // doiot.event = DOIOT_NORMAL;
+                // doiot.cur_obj = -1;
+                // doiot.discover_count++;
+                ////vTaskDelay(100 / portTICK_PERIOD_MS);
+                // printf("end index = %u\n", i);
                 break;
             }
         }
     } else if (is_message_in_str(data, "MIPLOBSERVE")) {
         //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
         mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
+        // printf("obj_id = |%s|", tmp);
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+            // printf("tmp = |%s|", tmp);
+            // printf("obj_id = |%s|", obj[i].id);
             if (!strcmp(tmp, obj[i].id) ){//&& !obj[i].observe) {
                 // doiot object operation
                 obj[i].observe = 1;
                 mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
+                // printf("msgid = %s",obj[i].msgid_observe );
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_OBSERVE;
@@ -551,11 +593,12 @@ void uart_forward()
         if (len0 > 0) {//receve from pc
             uart_write_bytes(UART_NUM_0, u_esp32, 8);
             uart_write_bytes(UART_NUM_0, (const char *) data0, len0);    //display back
-            // if (is_message_in_str((const char *)data0, "shut")) {
-            //     uart_sendstring(UART_NUM_1, "AT+MIPLCLOSE=0\r\n"); // MIPLCLOSE first
-            //     gpio_set_level(GPIO_PWR_DOIOT, 1);
-            //     vTaskDelay(5000 / portTICK_PERIOD_MS);
-            //     gpio_set_level(GPIO_PWR_DOIOT, 0);
+            if (is_message_in_str((const char *)data0, "shut")) {
+                uart_sendstring(UART_NUM_1, "AT+MIPLCLOSE=0\r\n"); // MIPLCLOSE first
+                gpio_set_level(GPIO_PWR_DOIOT, 1);
+                vTaskDelay(5000 / portTICK_PERIOD_MS);
+                gpio_set_level(GPIO_PWR_DOIOT, 0);
+            }
             // } else if (is_message_in_str((const char *)data0, "close")) {
             //     uart_sendstring(UART_NUM_1, "AT+MIPDISCOVER=0\r\n");
             //     // free(doiot);
@@ -585,28 +628,30 @@ void doiot_upload()
 {
     char cmd[50];
     char buf[10];
+    float num_test = 13.33;
     //doiot_event_t* doiot = get_doiot();
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        if (!doiot.upload_en && doiot.discover_count == 4) {
-            doiot.upload_en = 1;
-        }
+        // if (!doiot.upload_en && doiot.discover_count == 4) {
+        //     doiot.upload_en = 1;
+        // }
         
-        if (doiot.flag_miplopen && doiot.upload_en) {
+        if (doiot.flag_miplopen){ //&& doiot.upload_en) {
             
             for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
             {
+                num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
                 strcpy(cmd, "AT+MIPLNOTIFY=0,");
                 strcat(cmd, obj[i].msgid_observe);
                 strcat(cmd, ",");
                 strcat(cmd, obj[i].id);
                 strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
-                // float2char(num_test, buf);
+                float2char(num_test, buf);
                 // printf("num = %.2f, buf = %s \n", num_test, buf);
-                float2char(obj[i].value, buf);
+                // float2char(obj[i].value, buf);
                 strcat(cmd, buf);
                 strcat(cmd, ",0,0\r\n"); // next time try config index bit
                 printf("%s", cmd);
