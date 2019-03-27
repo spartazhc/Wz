@@ -1,0 +1,267 @@
+/**
+ * @file max44009.c
+ *
+ * ESP-IDF driver for MAX44009/BME280 digital pressure sensor
+ *
+ * Ported from esp-open-rtos
+ *
+ * Copyright (C) 2016 sheinz (https://github.com/sheinz)
+ * Copyright (C) 2018 Ruslan V. Uss (https://github.com/UncleRus)
+ * MIT Licensed as described in the file LICENSE
+ */
+#include "max44009.h"
+
+#include <esp_log.h>
+
+#define I2C_FREQ_HZ 1000000 // Max 1MHz for esp-idf
+
+static const char *TAG = "MAX44009";
+
+/**
+ * MAX44009 registers
+ */
+#define MAX44009_REG_INT_STATUS  0x00 /* bits: 0 */
+#define MAX44009_REG_INT_ENABLE  0x01 /* bits: 0 */
+/* CONT MANUAL - - CDR TIM[2:0] */
+#define MAX44009_REG_CONFIG      0x02 /* Power on state: 0x03 */
+#define MAX44009_REG_LUX_H       0x03 /* E: bits: 7-4; M: 3-0 */
+#define MAX44009_REG_LUX_L	     0x04 /* bits: 3-0 */
+#define MAX44009_REG_TH_U 	     0x05 /* E: bits: 7-4; M: 3-0 */
+#define MAX44009_REG_TH_L        0x06 /* E: bits: 7-4; M: 3-0 */
+#define MAX44009_REG_TH_T        0x07 
+
+#define CHECK(x) do { esp_err_t __; if ((__ = x) != ESP_OK) return __; } while (0)
+#define CHECK_ARG(VAL) do { if (!(VAL)) return ESP_ERR_INVALID_ARG; } while (0)
+#define CHECK_LOGE(dev, x, msg, ...) do { \
+        esp_err_t __; \
+        if ((__ = x) != ESP_OK) { \
+            I2C_DEV_GIVE_MUTEX(&dev->i2c_dev); \
+            ESP_LOGE(TAG, msg, ## __VA_ARGS__); \
+            return __; \
+        } \
+    } while (0)
+
+static esp_err_t read_register16(i2c_dev_t *dev, uint8_t reg, uint16_t *r)
+{
+    uint8_t d[] = { 0, 0 };
+
+    CHECK(i2c_dev_read_reg(dev, reg, d, 2));
+    *r = d[0] | (d[1] << 8);
+
+    return ESP_OK;
+}
+
+inline static esp_err_t write_register8(i2c_dev_t *dev, uint8_t addr, uint8_t value)
+{
+    return i2c_dev_write_reg(dev, addr, &value, 1);
+}
+
+
+
+static esp_err_t read_hum_calibration_data(max44009_t *dev)
+{
+    uint16_t h4, h5;
+
+    CHECK(i2c_dev_read_reg(&dev->i2c_dev, 0xa1, &dev->dig_H1, 1));
+    CHECK(read_register16(&dev->i2c_dev, 0xe1, (uint16_t *)&dev->dig_H2));
+    CHECK(i2c_dev_read_reg(&dev->i2c_dev, 0xe3, &dev->dig_H3, 1));
+    CHECK(read_register16(&dev->i2c_dev, 0xe4, &h4));
+    CHECK(read_register16(&dev->i2c_dev, 0xe5, &h5));
+    CHECK(i2c_dev_read_reg(&dev->i2c_dev, 0xe7, (uint8_t *)&dev->dig_H6, 1));
+
+    dev->dig_H4 = (h4 & 0x00ff) << 4 | (h4 & 0x0f00) >> 8;
+    dev->dig_H5 = h5 >> 4;
+    ESP_LOGD(TAG, "Calibration data received:");
+    ESP_LOGD(TAG, "dig_H1=%d", dev->dig_H1);
+    ESP_LOGD(TAG, "dig_H2=%d", dev->dig_H2);
+    ESP_LOGD(TAG, "dig_H3=%d", dev->dig_H3);
+    ESP_LOGD(TAG, "dig_H4=%d", dev->dig_H4);
+    ESP_LOGD(TAG, "dig_H5=%d", dev->dig_H5);
+    ESP_LOGD(TAG, "dig_H6=%d", dev->dig_H6);
+
+    return ESP_OK;
+}
+
+esp_err_t max44009_init_desc(max44009_t *dev, uint8_t addr, i2c_port_t port, gpio_num_t sda_gpio, gpio_num_t scl_gpio)
+{
+    CHECK_ARG(dev);
+
+    if (addr != MAX44009_I2C_ADDRESS_0 && addr != MAX44009_I2C_ADDRESS_1)
+    {
+        ESP_LOGE(TAG, "Invalid I2C address");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    dev->i2c_dev.port = port;
+    dev->i2c_dev.addr = addr;
+    dev->i2c_dev.cfg.sda_io_num = sda_gpio;
+    dev->i2c_dev.cfg.scl_io_num = scl_gpio;
+    dev->i2c_dev.cfg.master.clk_speed = I2C_FREQ_HZ;
+
+    CHECK(i2c_dev_create_mutex(&dev->i2c_dev));
+
+    return ESP_OK;
+}
+
+esp_err_t max44009_free_desc(max44009_t *dev)
+{
+    CHECK_ARG(dev);
+
+    return i2c_dev_delete_mutex(&dev->i2c_dev);
+}
+
+esp_err_t max44009_init_default_params(max44009_params_t *params)
+{
+    CHECK_ARG(params);
+
+    params->int_enable = MAX44009_INT_ENABLE;
+    params->mode = MAX44009_MODE_DEFAULT;
+    params->manual = MAX44009_MANUAL_DISABLE;
+    params->cdr = MAX44009_CDR_DISABLE;
+    params->integ_time = MAX44009_INTEGRATION_800;
+
+    return ESP_OK;
+}
+
+esp_err_t max44009_init(max44009_t *dev, max44009_params_t *params)
+{
+    CHECK_ARG(dev);
+    CHECK_ARG(params);
+
+    I2C_DEV_TAKE_MUTEX(&dev->i2c_dev);
+
+    // CHECK_LOGE(dev, i2c_dev_read_reg(&dev->i2c_dev, MAX44009_REG_ID, &dev->id, 1), "Sensor not found");
+
+    // if (dev->id != MAX44009_CHIP_ID && dev->id != BME280_CHIP_ID)
+    // {
+    //     CHECK_LOGE(dev, ESP_ERR_INVALID_VERSION, "Sensor wrong version");
+    // }
+
+    // Soft reset.
+    // CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_RESET, MAX44009_RESET_VALUE), "Failed resetting sensor");
+
+    // Wait until finished copying over the NVP data.
+    // while (1)
+    // {
+    //     uint8_t status;
+    //     if (!i2c_dev_read_reg(&dev->i2c_dev, MAX44009_REG_STATUS, &status, 1) && (status & 1) == 0)
+    //         break;
+    // }
+
+    // CHECK_LOGE(dev, read_calibration_data(dev), "Failed to read calibration data");
+
+    // if (dev->id == BME280_CHIP_ID)
+    // {
+    //     CHECK_LOGE(dev, read_hum_calibration_data(dev), "Failed to read humidity calibration data");
+    // }
+
+    ESP_LOGD(TAG, "Writing config interrupt reg=%x", params->int_enable);
+
+    CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_INT_ENABLE, params->int_enable), "Failed setting interrupt bit");
+
+    uint8_t config = (params->mode << 7) | (params->manual << 6) | 
+                        (params->cdr << 3) | (params->integ_time);
+    ESP_LOGD(TAG, "Writing config configure reg=%x", config);
+
+    CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_CONFIG, config), "Failed configuring sensor");
+
+    // if (params->mode == MAX44009_MODE_FORCED)
+    // {
+    //     params->mode = MAX44009_MODE_SLEEP;  // initial mode for forced is sleep
+    // }
+
+    // uint8_t ctrl = (params->oversampling_temperature << 5) | (params->oversampling_pressure << 2) | (params->mode);
+
+    // if (dev->id == BME280_CHIP_ID)
+    // {
+    //     // Write crtl hum reg first, only active after write to MAX44009_REG_CTRL.
+    //     uint8_t ctrl_hum = params->oversampling_humidity;
+    //     ESP_LOGD(TAG, "Writing ctrl hum reg=%x", ctrl_hum);
+    //     CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_CTRL_HUM, ctrl_hum), "Failed controlling sensor");
+    // }
+
+    // ESP_LOGD(TAG, "Writing ctrl reg=%x", ctrl);
+    // CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_CTRL, ctrl), "Failed controlling sensor");
+
+    I2C_DEV_GIVE_MUTEX(&dev->i2c_dev);
+
+    return ESP_OK;
+}
+2938 11.52 800 000 0 0000 1000
+0.09 5875 23.04 400 001 0 0001 1001
+0.18 11,750 46.08 200 010 0 0010 1010
+0.36 23,501 92.16
+100 011 0
+0011 1011
+800 000 1
+0.72 47,002 184.32
+50 100 0
+0100 1100
+400 001 1
+1.44 94,003 368.64
+25 101 0
+0101 1101
+200 010 1
+2.88 188,006 737.28
+12.5 110 0
+0110 1110
+100 011 1
+5.76 188,006 737.28
+6.25 111 0
+0111 1110
+50 100 1
+11.52 188,006 737.28 25 101 1 1000 1110
+23.04 188,006 737.28 12.5 110 1 1001 1110
+46.08 188,006
+esp_err_t max44009_set_threshold_etc(max44009_t *dev, int lux)
+{
+    if (lux < 2938) {
+        
+    } else if (lux < 5875) {
+
+	} else if (lux < 11750) {
+
+	} else if (lux < 23501) {
+
+	} else if (lux < 47002) {
+
+	} else if (lux < 94003) {
+
+	} else if (lux < 188006) {
+
+	} else if (lux < 5875) {
+
+	}
+    
+}
+esp_err_t max44009_force_measurement(max44009_t *dev)
+{
+    CHECK_ARG(dev);
+
+    I2C_DEV_TAKE_MUTEX(&dev->i2c_dev);
+
+    uint8_t ctrl;
+    I2C_DEV_CHECK(&dev->i2c_dev, i2c_dev_read_reg(&dev->i2c_dev, MAX44009_REG_CTRL, &ctrl, 1));
+    ctrl &= ~0b11;  // clear two lower bits
+    ctrl |= MAX44009_MODE_FORCED;
+    ESP_LOGD(TAG, "Writing ctrl reg=%x", ctrl);
+    CHECK_LOGE(dev, write_register8(&dev->i2c_dev, MAX44009_REG_CTRL, ctrl), "Failed starting forced mode");
+
+    I2C_DEV_GIVE_MUTEX(&dev->i2c_dev);
+
+    return ESP_OK;
+}
+
+esp_err_t max44009_read_float(max44009_t *dev, float *lux_f)
+{
+    uint8_t lux[] = {0, 0};
+    CHECK_LOGE(dev, i2c_dev_read_reg(*dev, MAX44009_REG_LUX_H, lux, 2), "Failed reading");
+
+    uint8_t exponent = (lux[0] & 0xf0) >> 4;
+    uint8_t mant = (lux[0] & 0x0f) << 4 | lux[1];
+    *lux_f = (float)(((0x00000001 << exponent) * (float)mant) * 0.045);
+
+    CHECK_LOGE(dev, max44009_set_threshold_etc(*dev, (int32_t)*lux_f), "Failed rading");
+
+    return ESP_OK;
+}
