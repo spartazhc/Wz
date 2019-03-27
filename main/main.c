@@ -436,22 +436,7 @@ void doiot_getevent(const char * data)
     char tmp[10];
     // char tmp2[10];
     // char cmd[80];
-    if (is_message_in_str(data, "MIPLDISCOVER")) {
-        // +MIPLDISCOVER: 0, 15321, 3303
-        mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
-        tmp[4] = '\0'; // manually set '\0'
-        for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            if (!strcmp(tmp, obj[i].id)&& !obj[i].discover) {
-                // doiot object operation
-                obj[i].discover = 1;    
-                mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
-                // doiot event operation
-                doiot.cur_obj = i; // save cur obj index
-                doiot.event = DOIOT_DISCOVER;
-                break;
-            }
-        }
-    } else if (is_message_in_str(data, "MIPLOBSERVE")) {
+    if (is_message_in_str(data, "MIPLOBSERVE")) {
         //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
         mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
         // printf("obj_id = |%s|", tmp);
@@ -466,6 +451,21 @@ void doiot_getevent(const char * data)
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_OBSERVE;
+                break;
+            }
+        }
+    } else if (is_message_in_str(data, "MIPLDISCOVER")) {
+        // +MIPLDISCOVER: 0, 15321, 3303
+        mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
+        tmp[4] = '\0'; // manually set '\0'
+        for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+            if (!strcmp(tmp, obj[i].id)&& !obj[i].discover) {
+                // doiot object operation
+                obj[i].discover = 1;    
+                mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
+                // doiot event operation
+                doiot.cur_obj = i; // save cur obj index
+                doiot.event = DOIOT_DISCOVER;
                 break;
             }
         }
