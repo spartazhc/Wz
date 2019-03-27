@@ -582,7 +582,7 @@ void doiot_upload()
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         if (!doiot.upload_en && doiot.discover_count == 4) {
             doiot.upload_en = 1;
-            printf("init success & upload enable\n")
+            printf("init success & upload enable\n");
         }
         if (doiot.flag_miplopen && doiot.upload_en) {
             
