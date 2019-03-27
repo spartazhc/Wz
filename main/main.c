@@ -17,6 +17,7 @@
 #define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
 #define GPIO_UV_EN              0
+
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       8          //Multisampling
@@ -39,7 +40,8 @@ max44009_t dev_m;
 // adc
 static esp_adc_cal_characteristics_t *adc_chars;
 static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
-static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO34
+static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
+// static const adc_channel_t channel3 = ADC_CHANNEL_4;     //GPIO32
 static const adc_atten_t atten = ADC_ATTEN_DB_11;
 static const adc_unit_t unit = ADC_UNIT_1;
 
@@ -148,7 +150,7 @@ void init_gpio()
     //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_LED_CONTROL | GPIO_UV_EN);
+    io_conf.pin_bit_mask = ((1ULL << GPIO_LED_CONTROL) | (1ULL << GPIO_UV_EN));
     //disable pull-down mode
     io_conf.pull_down_en = 0;
     //disable pull-up mode
@@ -354,19 +356,19 @@ void ml8511_read()
     float outputVoltage, uvIntensity;
     while(1)
     {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 1);
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
         uvLevel = analog_read(channel2);
-        // refLevel = analog_read(channel3);
-
+        printf("uvLevel = %d\n", uvLevel);
         vTaskDelay(10 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 0);
 
         // outputVoltage = 3.3 / refLevel * uvLevel;
-        outputVoltage = 3.3 / 4095 * uvLevel;
-
+        if (uvLevel <= 990) uvLevel = 990;
+        outputVoltage =  (float)uvLevel / 1000;
+        printf("outputVoltage = %.2f\n", outputVoltage);
         uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
 
         printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
@@ -388,10 +390,10 @@ void app_main()
     init_bme280();
     init_max44009();
 
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
     
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
