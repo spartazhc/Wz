@@ -20,7 +20,7 @@
 
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
-#define NO_OF_SAMPLES       8          //Multisampling
+#define NO_OF_SAMPLES       1          //Multisampling
 
 // gp2y time define in microsecoend !
 #define GP2Y_SAMPLE_TIME    280
@@ -319,7 +319,7 @@ void gp2y1014au0f_read()
 
     while(1)
     {
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_LED_CONTROL, 0);
         // printf("GPIO_25 set low\n");
         ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
@@ -392,8 +392,8 @@ void app_main()
 
     // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
     
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
