@@ -456,18 +456,18 @@ void doiot_getevent(const char * data)
         }
     } else if (is_message_in_str(data, "MIPLDISCOVER")) {
         // +MIPLDISCOVER: 0, 15321, 3303
-        printf("in DISCOVER\n");
+        // printf("in DISCOVER\n");
         mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
         tmp[4] = '\0'; // manually set '\0'
-        printf("tmp = %s\n",tmp);
+        // printf("tmp = %s\n",tmp);
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
-            printf("in for loop\n");
-            if (!strcmp(tmp, obj[i].id)&& !obj[i].discover) {
+            // printf("in for loop\n");
+            if (!strcmp(tmp, obj[i].id)){//&& !obj[i].discover) {
                 // doiot object operation
-                printf("in if\n");
+                // printf("in if\n");
                 obj[i].discover = 1;    
                 mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
-                printf("get msgid\n");
+                // printf("get msgid\n");
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_DISCOVER;
@@ -501,6 +501,7 @@ void doiot_response(const char* data)
             break;
         // when RSP, only msgid is needed
         case DOIOT_OBSERVE:
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
             strcat(cmd, obj[doiot.cur_obj].msgid_observe);
             strcat(cmd, ",1\r\n");
@@ -513,20 +514,21 @@ void doiot_response(const char* data)
             // AT+MIPLOBSERVERSP=0, ,1
             // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
         case DOIOT_DISCOVER:
-            printf("in DOIOT_DISCOVER\n");
+            // printf("in DOIOT_DISCOVER\n");
+            vTaskDelay(100 / portTICK_PERIOD_MS);
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
             strcat(cmd, obj[doiot.cur_obj].msgid_discover);
             strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
-            printf("make cmd: %s\n",cmd);
+            // printf("make cmd: %s\n",cmd);
             uart_sendstring(UART_NUM_1, cmd);
-            printf("cmd is sent\n");
+            // printf("cmd is sent\n");
             doiot.event = DOIOT_NORMAL;
-            printf("doiot.event = %d",doiot.event);
+            // printf("doiot.event = %d",doiot.event);
             // doiot.cur_obj = -1;
             doiot.discover_count++;
-            printf("discover_count = %d",doiot.discover_count);
+            // printf("discover_count = %d",doiot.discover_count);
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            printf("hello~\n");
+            // printf("hello~\n");
             break;
         case DOIOT_IP_CONNECTED:
             doiot.flag_ip = 1;
@@ -565,14 +567,14 @@ void uart_forward()
         if (len1 > 0) {//receive from doiot
             // printf("uart1[R]: %d\n", len1);
             // deal with response from doiot
-            printf("len1 = %d\n",len1);
+            // printf("len1 = %d\n",len1);
             uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
-            printf("doiot_getevent\n");
+            // printf("doiot_getevent\n");
             // once receive data from doiot, process the data;
             doiot_getevent((const char *) data1);
-            printf("doiot_response\n");
+            // printf("doiot_response\n");
             doiot_response((const char *) data1);
-            printf("len1 end\n");
+            // printf("len1 end\n");
         }
     }
 }
@@ -607,7 +609,7 @@ void doiot_upload()
                 // float2char(obj[i].value, buf);
                 strcat(cmd, buf);
                 strcat(cmd, ",0,0\r\n"); // next time try config index bit
-                printf("%s", cmd);
+                // printf("%s", cmd);
                 uart_sendstring(UART_NUM_1, cmd);
                 vTaskDelay(100 / portTICK_PERIOD_MS);
             }
