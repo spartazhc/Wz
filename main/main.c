@@ -74,17 +74,17 @@ void app_main()
     init_gpio();
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
-    // while (i2cdev_init() != ESP_OK)
-    // {
-    //     printf("Could not init I2Cdev library\n");
-    //     vTaskDelay(250 / portTICK_PERIOD_MS);
-    // }
-    // init_bme280();
-    // init_max44009();
+    while (i2cdev_init() != ESP_OK)
+    {
+        printf("Could not init I2Cdev library\n");
+        vTaskDelay(250 / portTICK_PERIOD_MS);
+    }
+    init_bme280();
+    init_max44009();
     // initiate doiot after start uart_forward task ()
     init_doiot();
-    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(doiot_upload, "doiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
@@ -583,7 +583,7 @@ void doiot_upload()
 {
     char cmd[50];
     char buf[10];
-    float num_test = 13.33;
+    // float num_test = 13.33;
     //doiot_event_t* doiot = get_doiot();
     printf("nbiot_upload task start!\n");
     while(1){
@@ -597,16 +597,18 @@ void doiot_upload()
             
             for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
             {
-                num_test += 1;
+                // num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
                 strcpy(cmd, "AT+MIPLNOTIFY=0,");
                 strcat(cmd, obj[i].msgid_observe);
                 strcat(cmd, ",");
                 strcat(cmd, obj[i].id);
                 strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
-                float2char(num_test, buf);
+                // float2char(num_test, buf);
                 // printf("num = %.2f, buf = %s \n", num_test, buf);
-                // float2char(obj[i].value, buf);
+                
+                float2char(obj[i].value, buf);
+                if (i==0) printf("obj[0].value = [f]:%.2f|[s]:%s\n");
                 strcat(cmd, buf);
                 strcat(cmd, ",0,0\r\n"); // next time try config index bit
                 // printf("%s", cmd);
