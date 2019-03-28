@@ -67,7 +67,7 @@
 
 // typedef struct doiot_obj_ *doiot_object;
 typedef struct {
-    char id[5];
+    char id[10];
     float value;
     bool observe;
     bool discover;

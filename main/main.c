@@ -73,7 +73,7 @@ void app_main()
 	xSemaphore = xSemaphoreCreateBinary();
     init_gpio();
     init_uart();
-    xTaskCreate(uart_forward, "uart_forward", 1024, NULL, 10, NULL);
+    xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
     // while (i2cdev_init() != ESP_OK)
     // {
     //     printf("Could not init I2Cdev library\n");
@@ -456,13 +456,18 @@ void doiot_getevent(const char * data)
         }
     } else if (is_message_in_str(data, "MIPLDISCOVER")) {
         // +MIPLDISCOVER: 0, 15321, 3303
+        printf("in DISCOVER\n");
         mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
         tmp[4] = '\0'; // manually set '\0'
+        printf("tmp = %s\n",tmp);
         for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+            printf("in for loop\n");
             if (!strcmp(tmp, obj[i].id)&& !obj[i].discover) {
                 // doiot object operation
+                printf("in if\n");
                 obj[i].discover = 1;    
                 mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
+                printf("get msgid\n");
                 // doiot event operation
                 doiot.cur_obj = i; // save cur obj index
                 doiot.event = DOIOT_DISCOVER;
@@ -508,14 +513,20 @@ void doiot_response(const char* data)
             // AT+MIPLOBSERVERSP=0, ,1
             // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
         case DOIOT_DISCOVER:
+            printf("in DOIOT_DISCOVER\n");
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
             strcat(cmd, obj[doiot.cur_obj].msgid_discover);
             strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
+            printf("make cmd: %s\n",cmd);
             uart_sendstring(UART_NUM_1, cmd);
+            printf("cmd is sent\n");
             doiot.event = DOIOT_NORMAL;
+            printf("doiot.event = %d",doiot.event);
             // doiot.cur_obj = -1;
             doiot.discover_count++;
+            printf("discover_count = %d",doiot.discover_count);
             vTaskDelay(100 / portTICK_PERIOD_MS);
+            printf("hello~\n");
             break;
         case DOIOT_IP_CONNECTED:
             doiot.flag_ip = 1;
@@ -526,7 +537,6 @@ void doiot_response(const char* data)
         default:
             break;
     }
-    return;
 }
 
 /**
@@ -542,7 +552,7 @@ void uart_forward()
     // const char *u_doiot = {"doiot: "};
     printf("init\n");
     while (1) {
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
         // Read data from the UART0
         int len0 = uart_read_bytes(UART_NUM_0, data0, BUF_SIZE, 20 / portTICK_RATE_MS);
         int len1 = uart_read_bytes(UART_NUM_1, data1, BUF_SIZE, 20 / portTICK_RATE_MS);
@@ -550,22 +560,19 @@ void uart_forward()
         if (len0 > 0) {//receve from pc
             uart_write_bytes(UART_NUM_0, u_esp32, 8);
             uart_write_bytes(UART_NUM_0, (const char *) data0, len0);    //display back
-            if (is_message_in_str((const char *)data0, "shut")) {
-                uart_sendstring(UART_NUM_1, "AT+MIPLCLOSE=0\r\n"); // MIPLCLOSE first
-                gpio_set_level(GPIO_PWR_DOIOT, 1);
-                vTaskDelay(5000 / portTICK_PERIOD_MS);
-                gpio_set_level(GPIO_PWR_DOIOT, 0);
-            }
             uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to doiot
         }
         if (len1 > 0) {//receive from doiot
             // printf("uart1[R]: %d\n", len1);
             // deal with response from doiot
+            printf("len1 = %d\n",len1);
             uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
-
+            printf("doiot_getevent\n");
             // once receive data from doiot, process the data;
             doiot_getevent((const char *) data1);
+            printf("doiot_response\n");
             doiot_response((const char *) data1);
+            printf("len1 end\n");
         }
     }
 }
