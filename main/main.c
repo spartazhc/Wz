@@ -302,7 +302,7 @@ void max44009_task()
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
-                if (doiot.discover_count >= 4) {
+                if (doiot.upload_en) {
                     obj[0].value = lux_f;
                 }
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
