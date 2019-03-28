@@ -8,12 +8,12 @@
 #include <max44009.h>
 #include "driver/uart.h"
 #include <string.h>
-#include <doiot.h>
+#include <me3616.h>
 
 #define SDA_GPIO 18
 #define SCL_GPIO 19
 #define GPIO_INTR_IO    GPIO_NUM_5
-#define GPIO_PWR_DOIOT  GPIO_NUM_4
+
 #define ESP_INTR_FLAG_DEFAULT   0
 // UART
 #define ECHO_TEST_TXD  (GPIO_NUM_17)
@@ -22,8 +22,9 @@
 #define ECHO_TEST_CTS  (UART_PIN_NO_CHANGE)
 #define BUF_SIZE (1024)
 
-extern doiot_obj_t obj[DOIOT_OBJ_NUM];
-extern doiot_event_t doiot;
+extern me3616_obj_t obj[ME3616_OBJ_NUM];
+extern me3616_event_t me3616;
+extern bool flag_ok ;
 SemaphoreHandle_t xSemaphore = NULL;
 bmp280_params_t params_b;
 max44009_params_t params_m;
@@ -53,44 +54,93 @@ void init_gpio();
 void init_uart();
 void init_bme280();
 void init_max44009();
-void init_doiot();
+void init_me3616();
 void bmp280_read();
 void max44009_task();
-void doiot_getevent(const char * data);
-void doiot_response(const char * data);
+void me3616_getevent(const char * data);
+void me3616_response(const char * data);
 void uart_forward();
-void doiot_upload();
+void me3616_upload();
 // void max44009_read(void *pvParameters);
 // void max44009_th_test(void *pvParameters);
 
+void me3616_test(){
+    int ret = 0;
+    me3616_power_on();
+    printf("Doiot System Start.\r\n");
+    // wait until internet connect success
+    while (!me3616.flag_ip){
+        vTaskDelay(1000 / portTICK_PERIOD_MS); 
+    }
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 提示符
+    ret = me3616_send_cmd("AT\r\n", flag_ok, 300);
+    printf("**ret = %d\n", ret);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 查询模块识别信息
+    ret = me3616_send_cmd("ATI\r\n", flag_ok, 300);
+    printf("**ret = %d\n", ret);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 查询IMEI号
+    ret = me3616_send_cmd("AT+CGSN=1\r\n", flag_ok, 300);
+    printf("**ret = %d\n", ret);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 查询IMSI号
+    me3616_send_cmd("AT+CIMI\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 查询信号强度
+    me3616_send_cmd("AT+CSQ\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 查询网络附着状态
+    me3616_send_cmd("AT+CEREG?\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    
+    // 创建onenet平台
+    me3616_send_cmd("AT+MIPLCREATE\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 新增object id:3303(temperature)
+    me3616_send_cmd("AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    me3616_send_cmd("AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    me3616_send_cmd("AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    // 注册onenet 平台  这一步比较费时间，要多delay
+    // me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n");
+    // while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
+    // vTaskDelay(100 / portTICK_PERIOD_MS);
+}
 
 
 void app_main()
 {
-    // //doiot_event_t* doiot = get_doiot();
+    // //me3616_event_t* me3616 = get_me3616();
 
     // create the binary semaphore
 	xSemaphore = xSemaphoreCreateBinary();
     init_gpio();
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
-    while (i2cdev_init() != ESP_OK)
-    {
-        printf("Could not init I2Cdev library\n");
-        vTaskDelay(250 / portTICK_PERIOD_MS);
-    }
-    init_bme280();
-    init_max44009();
-    // initiate doiot after start uart_forward task ()
-    init_doiot();
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(doiot_upload, "doiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
+    me3616_test();
+    // while (i2cdev_init() != ESP_OK)
+    // {
+    //     printf("Could not init I2Cdev library\n");
+    //     vTaskDelay(250 / portTICK_PERIOD_MS);
+    // }
+    // init_bme280();
+    // init_max44009();
+    // initiate me3616 after start uart_forward task ()
+    // init_me3616();
+    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
-	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+	// gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	
 	// attach the interrupt service routine
-	gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
+	// gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
 }
 
 
@@ -99,23 +149,23 @@ void init_gpio()
     //max44009 intr pin
     gpio_config_t io_conf;
     //enable interrupt negedge
-    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_INPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
+    // io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
+    // //set as output mode
+    // io_conf.mode = GPIO_MODE_INPUT;
+    // //bit mask of the pins that you want to set,e.g.GPIO18/19
+    // io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
+    // //disable pull-down mode
+    // io_conf.pull_down_en = 0;
+    // //enable pull-up mode
+    // io_conf.pull_up_en = 1;
+    // //configure GPIO with the given settings
+    // gpio_config(&io_conf);
     //disable interrupt
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
     //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_PWR_DOIOT);
+    io_conf.pin_bit_mask = ((1ULL << GPIO_PWR_ME3616)|(1ULL << GPIO_RESET_ME3616));
     //disable pull-down mode
     io_conf.pull_down_en = 1;
     //enable pull-up mode
@@ -193,18 +243,18 @@ void init_max44009()
     }
 }
 
-void init_doiot()
+void init_me3616()
 {   
-    //doiot_event_t* doiot = get_doiot();
-    // power doiot
-    gpio_set_level(GPIO_PWR_DOIOT, 1);
+    //me3616_event_t* me3616 = get_me3616();
+    // power me3616
+    gpio_set_level(GPIO_PWR_ME3616, 1);
     vTaskDelay(2000 / portTICK_PERIOD_MS);
-    gpio_set_level(GPIO_PWR_DOIOT, 0);
+    gpio_set_level(GPIO_PWR_ME3616, 0);
     printf("Doiot System Start.\r\n");
     // wait until internet connect success
-    while (!doiot.flag_ip){
+    while (!me3616.flag_ip){
         vTaskDelay(1000 / portTICK_PERIOD_MS); 
-        // printf("flag_ip = %d\n", doiot.flag_ip);
+        // printf("flag_ip = %d\n", me3616.flag_ip);
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
     
@@ -241,7 +291,7 @@ void init_doiot()
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
-    while (!doiot.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
+    while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // vTaskDelay(60 * 1000 / portTICK_PERIOD_MS);
 }
@@ -264,7 +314,7 @@ void bmp280_read()
 
         printf("Pres: %.2f Pa, Temp: %.2f C, Hum: %.2f%%\n", pressure, temperature, humidity);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        if (doiot.discover_count >= 4) {
+        if (me3616.discover_count >= 4) {
             obj[1].value = temperature;
             obj[2].value = humidity;
             obj[3].value = pressure;
@@ -302,7 +352,7 @@ void max44009_task()
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
-                if (doiot.upload_en) {
+                if (me3616.upload_en) {
                     obj[0].value = lux_f;
                 }
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
@@ -431,26 +481,30 @@ void float2char(float slope, char* buffer)  //浮点型数，存储的字符数�
     buffer[i + k] = '\0';
 }
 
-void doiot_getevent(const char * data)
+void me3616_getevent(const char * data)
 {
     char tmp[10];
     // char tmp2[10];
     // char cmd[80];
+    if (is_message_in_str(data, "OK")) {
+        flag_ok = 1;
+    }
+    
     if (is_message_in_str(data, "MIPLOBSERVE")) {
         //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
         mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
         // printf("obj_id = |%s|", tmp);
-        for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+        for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
             // printf("tmp = |%s|", tmp);
             // printf("obj_id = |%s|", obj[i].id);
             if (!strcmp(tmp, obj[i].id)&& !obj[i].observe) {
-                // doiot object operation
+                // me3616 object operation
                 obj[i].observe = 1;
                 mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
                 // printf("msgid = %s",obj[i].msgid_observe );
-                // doiot event operation
-                doiot.cur_obj = i; // save cur obj index
-                doiot.event = DOIOT_OBSERVE;
+                // me3616 event operation
+                me3616.cur_obj = i; // save cur obj index
+                me3616.event = ME3616_OBSERVE;
                 break;
             }
         }
@@ -460,81 +514,81 @@ void doiot_getevent(const char * data)
         mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
         tmp[4] = '\0'; // manually set '\0'
         // printf("tmp = %s\n",tmp);
-        for(size_t i = 0; i < DOIOT_OBJ_NUM; i++) {
+        for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
             // printf("in for loop\n");
             if (!strcmp(tmp, obj[i].id)){//&& !obj[i].discover) {
-                // doiot object operation
+                // me3616 object operation
                 // printf("in if\n");
                 obj[i].discover = 1;    
                 mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
                 // printf("get msgid\n");
-                // doiot event operation
-                doiot.cur_obj = i; // save cur obj index
-                doiot.event = DOIOT_DISCOVER;
+                // me3616 event operation
+                me3616.cur_obj = i; // save cur obj index
+                me3616.event = ME3616_DISCOVER;
                 break;
             }
         }
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
-        doiot.event = DOIOT_REG_SUCCESS;
+        me3616.event = ME3616_REG_SUCCESS;
         return;
     } else if (is_message_in_str(data, "+IP:")) {
-        doiot.event = DOIOT_IP_CONNECTED;
+        me3616.event = ME3616_IP_CONNECTED;
         return;
         // printf("event: get_ip\n");
     } else {
-        doiot.event = DOIOT_NORMAL;    // set to DOIOT_NORMAL
+        me3616.event = ME3616_NORMAL;    // set to ME3616_NORMAL
         return;
     }
     return;   
 }
 //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
 // +MIPLDISCOVER: 0, 15321, 3303
-void doiot_response(const char* data)
+void me3616_response(const char* data)
 {
     // const char* miplobserve = "MIPLOBSERVE";
     char cmd[80];
-    //doiot_event_t* doiot = get_doiot();
+    //me3616_event_t* me3616 = get_me3616();
 
-    switch (doiot.event)
+    switch (me3616.event)
     {
-        case DOIOT_NORMAL:
+        case ME3616_NORMAL:
             break;
         // when RSP, only msgid is needed
-        case DOIOT_OBSERVE:
+        case ME3616_OBSERVE:
             vTaskDelay(100 / portTICK_PERIOD_MS);
             strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
-            strcat(cmd, obj[doiot.cur_obj].msgid_observe);
+            strcat(cmd, obj[me3616.cur_obj].msgid_observe);
             strcat(cmd, ",1\r\n");
             uart_sendstring(UART_NUM_1, cmd);
-            doiot.event = DOIOT_NORMAL;
-            // doiot.cur_obj = -1;
-            doiot.observe_count++;
+            me3616.event = ME3616_NORMAL;
+            // me3616.cur_obj = -1;
+            me3616.observe_count++;
             vTaskDelay(100 / portTICK_PERIOD_MS);
             break;
             // AT+MIPLOBSERVERSP=0, ,1
             // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
-        case DOIOT_DISCOVER:
-            // printf("in DOIOT_DISCOVER\n");
+        case ME3616_DISCOVER:
+            // printf("in ME3616_DISCOVER\n");
             vTaskDelay(100 / portTICK_PERIOD_MS);
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-            strcat(cmd, obj[doiot.cur_obj].msgid_discover);
+            strcat(cmd, obj[me3616.cur_obj].msgid_discover);
             strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
             // printf("make cmd: %s\n",cmd);
             uart_sendstring(UART_NUM_1, cmd);
             // printf("cmd is sent\n");
-            doiot.event = DOIOT_NORMAL;
-            // printf("doiot.event = %d",doiot.event);
-            // doiot.cur_obj = -1;
-            doiot.discover_count++;
-            // printf("discover_count = %d",doiot.discover_count);
+            me3616.event = ME3616_NORMAL;
+            // printf("me3616.event = %d",me3616.event);
+            // me3616.cur_obj = -1;
+            me3616.discover_count++;
+            // printf("discover_count = %d",me3616.discover_count);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             // printf("hello~\n");
             break;
-        case DOIOT_IP_CONNECTED:
-            doiot.flag_ip = 1;
+        case ME3616_IP_CONNECTED:
+            me3616.flag_ip = 1;
             break;
-        case DOIOT_REG_SUCCESS:
-            doiot.flag_miplopen = 1;
+        case ME3616_REG_SUCCESS:
+            me3616.flag_miplopen = 1;
             break;
         default:
             break;
@@ -543,7 +597,7 @@ void doiot_response(const char* data)
 
 /**
  * uart0:   pc  -- esp32
- * uart1: esp32 -- doiot
+ * uart1: esp32 -- me3616
  */
 void uart_forward()
 {
@@ -551,7 +605,7 @@ void uart_forward()
     uint8_t *data0 = (uint8_t *) malloc(BUF_SIZE);
     uint8_t *data1 = (uint8_t *) malloc(BUF_SIZE);
     const char *u_esp32 = {"\nesp32: "};
-    // const char *u_doiot = {"doiot: "};
+    // const char *u_me3616 = {"me3616: "};
     printf("init\n");
     while (1) {
         vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -562,40 +616,40 @@ void uart_forward()
         if (len0 > 0) {//receve from pc
             uart_write_bytes(UART_NUM_0, u_esp32, 8);
             uart_write_bytes(UART_NUM_0, (const char *) data0, len0);    //display back
-            uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to doiot
+            uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to me3616
         }
-        if (len1 > 0) {//receive from doiot
+        if (len1 > 0) {//receive from me3616
             // printf("uart1[R]: %d\n", len1);
-            // deal with response from doiot
+            // deal with response from me3616
             // printf("len1 = %d\n",len1);
             uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
-            // printf("doiot_getevent\n");
-            // once receive data from doiot, process the data;
-            doiot_getevent((const char *) data1);
-            // printf("doiot_response\n");
-            doiot_response((const char *) data1);
+            // printf("me3616_getevent\n");
+            // once receive data from me3616, process the data;
+            me3616_getevent((const char *) data1);
+            // printf("me3616_response\n");
+            me3616_response((const char *) data1);
             // printf("len1 end\n");
         }
     }
 }
 
-void doiot_upload()
+void me3616_upload()
 {
     char cmd[50];
     char buf[10];
     // float num_test = 13.33;
-    //doiot_event_t* doiot = get_doiot();
+    //me3616_event_t* me3616 = get_me3616();
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        if (!doiot.upload_en && doiot.discover_count == 4) {
-            doiot.upload_en = 1;
+        if (!me3616.upload_en && me3616.discover_count == 4) {
+            me3616.upload_en = 1;
             printf("init success & upload enable\n");
         }
-        if (doiot.flag_miplopen && doiot.upload_en) {
+        if (me3616.flag_miplopen && me3616.upload_en) {
             
-            for(size_t i = 0; i < DOIOT_OBJ_NUM; i++)
+            for(size_t i = 0; i < ME3616_OBJ_NUM; i++)
             {
                 // num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
@@ -608,7 +662,6 @@ void doiot_upload()
                 // printf("num = %.2f, buf = %s \n", num_test, buf);
                 
                 float2char(obj[i].value, buf);
-                if (i==0) printf("obj[0].value = [f]:%.2f|[s]:%s\n");
                 strcat(cmd, buf);
                 strcat(cmd, ",0,0\r\n"); // next time try config index bit
                 // printf("%s", cmd);

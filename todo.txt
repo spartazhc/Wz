@@ -1,0 +1,13 @@
+Todo List
+
+## onenet
+- 支持最大最小值
+- 支持单位
+- 支持onenet请求read
+- 支持PSM模式
+
+
+
+## merge
+- merge ml8511(included gp2y) to nbiot 
+
