@@ -393,7 +393,7 @@ void app_main()
     // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 4, NULL, APP_CPU_NUM);
     
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
