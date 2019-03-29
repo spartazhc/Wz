@@ -123,7 +123,7 @@ void app_main()
     init_gpio();
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
-    me3616_test();
+    // me3616_test();
     // while (i2cdev_init() != ESP_OK)
     // {
     //     printf("Could not init I2Cdev library\n");
@@ -132,7 +132,7 @@ void app_main()
     // init_bme280();
     // init_max44009();
     // initiate me3616 after start uart_forward task ()
-    // init_me3616();
+    init_me3616();
     // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
@@ -571,10 +571,10 @@ void me3616_response(const char* data)
         case ME3616_DISCOVER:
             // printf("in ME3616_DISCOVER\n");
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            // me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "5700;5601;5602");
-            strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-            strcat(cmd, obj[me3616.cur_obj].msgid_discover);
-            strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
+            me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "\"5700;5601;5602\"");
+            // strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
+            // strcat(cmd, obj[me3616.cur_obj].msgid_discover);
+            // strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
             // printf("make cmd: %s\n",cmd);
             uart_sendstring(UART_NUM_1, cmd);
             printf("cmd is sent\n");

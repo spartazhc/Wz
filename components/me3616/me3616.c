@@ -75,7 +75,7 @@ char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid){
 
 char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring){
     sprintf(dst, "AT+MIPLDISCOVERRSP=0,%s,1,%d,%s\r\n", msgid, 
-                            strlen(valuestring), valuestring);
+                            (int)strlen(valuestring)-2, valuestring);
     return dst;
 }
 
