@@ -32,6 +32,11 @@
 #define OBJ_HUMIDITY        3304
 #define OBJ_PRESSURE        3323
 
+#define TYPE_STRING     1
+#define TYPE_OPAQUE     2
+#define TYPE_INTEGER    3
+#define TYPE_FLOAT      4
+#define TYPE_BOOL       5
 #define ME3616_OBJ_NUM 4
 
 
@@ -52,6 +57,7 @@ typedef struct {
     bool flag_ip;
     bool flag_miplopen;
     bool upload_en;
+    bool flag_write;
     int observe_count;
     int discover_count;
 } me3616_event_t;
@@ -67,4 +73,10 @@ void me3616_wake_up(void);
 int me3616_sleep_config(int mode);
 char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid);
 char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring);
+char* me3616_onenet_miplnotify(char* dst, const char* msgid, const char* objectid,
+    int resourceid, int valuetype, const char *value, int index);
+
+char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objectid, 
+                        const char* resourceid, int valuetype,
+                        const char *value, int index);
 #endif  

@@ -124,23 +124,23 @@ void app_main()
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
     // me3616_test();
-    // while (i2cdev_init() != ESP_OK)
-    // {
-    //     printf("Could not init I2Cdev library\n");
-    //     vTaskDelay(250 / portTICK_PERIOD_MS);
-    // }
-    // init_bme280();
-    // init_max44009();
+    while (i2cdev_init() != ESP_OK)
+    {
+        printf("Could not init I2Cdev library\n");
+        vTaskDelay(250 / portTICK_PERIOD_MS);
+    }
+    init_bme280();
+    init_max44009();
     // initiate me3616 after start uart_forward task ()
     init_me3616();
-    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
+    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
-	// gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	
 	// attach the interrupt service routine
-	// gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
+	gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
 }
 
 
@@ -149,17 +149,17 @@ void init_gpio()
     //max44009 intr pin
     gpio_config_t io_conf;
     //enable interrupt negedge
-    // io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    // //set as output mode
-    // io_conf.mode = GPIO_MODE_INPUT;
-    // //bit mask of the pins that you want to set,e.g.GPIO18/19
-    // io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
-    // //disable pull-down mode
-    // io_conf.pull_down_en = 0;
-    // //enable pull-up mode
-    // io_conf.pull_up_en = 1;
-    // //configure GPIO with the given settings
-    // gpio_config(&io_conf);
+    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO18/19
+    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
     //disable interrupt
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
     //set as output mode
@@ -483,56 +483,90 @@ void float2char(float slope, char* buffer)  //浮点型数，存储的字符数�
 
 void me3616_getevent(const char * data)
 {
-    char tmp[10];
+    // char tmp[10];
     // char tmp2[10];
-    // char cmd[80];
+    char cmd[80];
+    char objid[10];
+    char msgid[10];
+    char resourceid[10];
+    char value[15];
     if (is_message_in_str(data, "OK")) {
         flag_ok = 1;
     }
     
-    if (is_message_in_str(data, "MIPLOBSERVE")) {
+    if (is_message_in_str(data, "MIPLOBSERVE:")) {
         //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
-        mystrcpy(data, tmp, 3);// get object id from data (3: obj_id, 1: msgid)
+        mystrcpy(data, objid, 3);// get object id from data (3: obj_id, 1: msgid)
         // printf("obj_id = |%s|", tmp);
         for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
             // printf("tmp = |%s|", tmp);
             // printf("obj_id = |%s|", obj[i].id);
-            if (!strcmp(tmp, obj[i].id)&& !obj[i].observe) {
+            if (!strcmp(objid, obj[i].id)&& !obj[i].observe) {
                 // me3616 object operation
                 obj[i].observe = 1;
                 mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
                 // printf("msgid = %s",obj[i].msgid_observe );
-                // me3616 event operation
-                me3616.cur_obj = i; // save cur obj index
-                me3616.event = ME3616_OBSERVE;
+                me3616_onenet_miplobserve_rsp(cmd, obj[i].msgid_observe);
+                uart_sendstring(UART_NUM_1, cmd);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
                 break;
             }
         }
-    } else if (is_message_in_str(data, "MIPLDISCOVER")) {
+    } else if (is_message_in_str(data, "MIPLDISCOVER:")) {
         // +MIPLDISCOVER: 0, 15321, 3303
         // printf("in DISCOVER\n");
-        mystrcpy(data, tmp, 2);// get object id from data (2: obj_id, 1: msgid)
-        tmp[4] = '\0'; // manually set '\0'
+        mystrcpy(data, objid, 2);// get object id from data (2: obj_id, 1: msgid)
+        objid[4] = '\0'; // manually set '\0'
+        mystrcpy(data, msgid, 1);// copy msgid to object
         // printf("tmp = %s\n",tmp);
         for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
             // printf("in for loop\n");
-            if (!strcmp(tmp, obj[i].id)){//&& !obj[i].discover) {
+            if (!strcmp(objid, obj[i].id)){//&& !obj[i].discover) {
                 // me3616 object operation
                 // printf("in if\n");
                 obj[i].discover = 1;    
-                mystrcpy(data, obj[i].msgid_discover, 1);// copy msgid to object
-                // printf("get msgid\n");
-                // me3616 event operation
-                me3616.cur_obj = i; // save cur obj index
-                me3616.event = ME3616_DISCOVER;
+                me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602\"");
+                uart_sendstring(UART_NUM_1, cmd);
+                me3616.discover_count++;
+                vTaskDelay(100 / portTICK_PERIOD_MS);
                 break;
             }
         }
+    } else if (is_message_in_str(data, "MIPLREAD:")) {
+        // 现在我返回的类型似乎都是float 
+        // +MIPLREAD: 0, 65313, 3303, 0, 5700
+        // AT+MIPLREADRSP=0,65313,1,3303,0,5700,4,4,20.123,0,0
+        mystrcpy(data, msgid, 1);
+        mystrcpy(data, objid, 2);// get object id
+        
+        mystrcpy(data, resourceid, 4);
+        resourceid[4] = '\0';
+        // if object is in bme280
+        if (!strcmp(objid, "3303") || !strcmp(objid, "3304") || !strcmp(objid, "3323")) {
+            float pressure=0, temperature=0, humidity=0;
+            bmp280_force_measurement(&dev_b);
+            bmp280_read_float(&dev_b, &temperature, &pressure, &humidity);
+            if(!strcmp(objid, "3303")) {
+                float2char(temperature, value);
+                obj[1].value = temperature;
+            } else if(!strcmp(objid, "3304")) {
+                float2char(humidity, value);
+                obj[2].value = humidity;
+            } else if(!strcmp(objid, "3323")) {
+                float2char(pressure, value);
+                obj[3].value = pressure;
+            } 
+        }
+        me3616_onenet_miplread_rsp(cmd, msgid, objid, resourceid, TYPE_FLOAT, value, 0);
+        uart_sendstring(UART_NUM_1, cmd);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
-        me3616.event = ME3616_REG_SUCCESS;
+        // me3616.event = ME3616_REG_SUCCESS;
+        me3616.flag_miplopen = 1;
         return;
     } else if (is_message_in_str(data, "+IP:")) {
-        me3616.event = ME3616_IP_CONNECTED;
+        // me3616.event = ME3616_IP_CONNECTED;
+        me3616.flag_ip = 1;
         return;
         // printf("event: get_ip\n");
     } else {
@@ -610,7 +644,7 @@ void uart_forward()
     // const char *u_me3616 = {"me3616: "};
     printf("init\n");
     while (1) {
-        vTaskDelay(100 / portTICK_PERIOD_MS);
+        vTaskDelay(200 / portTICK_PERIOD_MS);
         // Read data from the UART0
         int len0 = uart_read_bytes(UART_NUM_0, data0, BUF_SIZE, 20 / portTICK_RATE_MS);
         int len1 = uart_read_bytes(UART_NUM_1, data1, BUF_SIZE, 20 / portTICK_RATE_MS);
@@ -629,7 +663,7 @@ void uart_forward()
             // once receive data from me3616, process the data;
             me3616_getevent((const char *) data1);
             // printf("me3616_response\n");
-            me3616_response((const char *) data1);
+            // me3616_response((const char *) data1);
             // printf("len1 end\n");
         }
     }
@@ -648,6 +682,7 @@ void me3616_upload()
         if (!me3616.upload_en && me3616.discover_count == 4) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");
+
         }
         if (me3616.flag_miplopen && me3616.upload_en) {
             
@@ -655,18 +690,21 @@ void me3616_upload()
             {
                 // num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
-                strcpy(cmd, "AT+MIPLNOTIFY=0,");
-                strcat(cmd, obj[i].msgid_observe);
-                strcat(cmd, ",");
-                strcat(cmd, obj[i].id);
-                strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
-                // float2char(num_test, buf);
-                // printf("num = %.2f, buf = %s \n", num_test, buf);
-                
                 float2char(obj[i].value, buf);
-                strcat(cmd, buf);
-                strcat(cmd, ",0,0\r\n"); // next time try config index bit
+                // strcpy(cmd, "AT+MIPLNOTIFY=0,");
+                // strcat(cmd, obj[i].msgid_observe);
+                // strcat(cmd, ",");
+                // strcat(cmd, obj[i].id);
+                // strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
+                // // float2char(num_test, buf);
+                // // printf("num = %.2f, buf = %s \n", num_test, buf);
+                
+                
+                // strcat(cmd, buf);
+                // strcat(cmd, ",0,0\r\n"); // next time try config index bit
                 // printf("%s", cmd);
+                me3616_onenet_miplnotify(cmd, obj[i].msgid_observe, obj[i].id,
+                 5700, 4, buf, 0);
                 uart_sendstring(UART_NUM_1, cmd);
                 vTaskDelay(100 / portTICK_PERIOD_MS);
             }

@@ -78,6 +78,37 @@ char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *v
                             (int)strlen(valuestring)-2, valuestring);
     return dst;
 }
+// AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
+// only one instance so fixed
+char* me3616_onenet_miplnotify(char* dst, const char* msgid, const char* objectid,
+    int resourceid, int valuetype, const char *value, int index){
+	int len = 4; // default 4
+	if (valuetype == 1) len = (int) strlen(value);
+    sprintf(dst, "AT+MIPLNOTIFY=0,%s,%s,0,%d,%d,%d,%s,%d,0\r\n", msgid, objectid,
+        resourceid, valuetype, len, value, index);
+    return dst;
+}
+
+
+char* me3616_onenet_miplupdate(char* dst, int mode){
+    sprintf(dst, "AT+MIPLUPDATE=0,3600,%d\r\n", mode);
+    return dst;
+}
+
+// +MIPLREAD: 0, 65313, 3303, 0, 5700
+// AT+MIPLREADRSP=0,65313,1,3303,0,5700,4,4,20.123,0,0
+char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objectid, 
+                        const char* resourceid, int valuetype,
+                        const char *value, int index)
+{
+	int len = 4; // default 4
+	if (valuetype == 1) len = (int) strlen(value);
+	sprintf(dst, "AT+MIPLREADRSP=0,%s,%d,%s,%d,%s,%d,%d,%s,%d,%d,\r\n", msgid, 1, objectid, 0, resourceid, valuetype, len, value, index,0);
+
+	return dst;
+}
+
+// me3616_onenet_miplread_rsp(cmd, msgid, "3303", 5700,4,"3.3",0);
 
 
 
