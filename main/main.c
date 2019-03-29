@@ -108,8 +108,8 @@ void me3616_test(){
     me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
-    // me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n");
-    // while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
+    me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n", flag_ok, 300);
+    while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
     // vTaskDelay(100 / portTICK_PERIOD_MS);
 }
 
@@ -556,9 +556,10 @@ void me3616_response(const char* data)
         // when RSP, only msgid is needed
         case ME3616_OBSERVE:
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
-            strcat(cmd, obj[me3616.cur_obj].msgid_observe);
-            strcat(cmd, ",1\r\n");
+            // strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
+            // strcat(cmd, obj[me3616.cur_obj].msgid_observe);
+            // strcat(cmd, ",1\r\n");
+            me3616_onenet_miplobserve_rsp(cmd, obj[me3616.cur_obj].msgid_observe);
             uart_sendstring(UART_NUM_1, cmd);
             me3616.event = ME3616_NORMAL;
             // me3616.cur_obj = -1;
@@ -570,12 +571,13 @@ void me3616_response(const char* data)
         case ME3616_DISCOVER:
             // printf("in ME3616_DISCOVER\n");
             vTaskDelay(100 / portTICK_PERIOD_MS);
+            // me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "5700;5601;5602");
             strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
             strcat(cmd, obj[me3616.cur_obj].msgid_discover);
             strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
             // printf("make cmd: %s\n",cmd);
             uart_sendstring(UART_NUM_1, cmd);
-            // printf("cmd is sent\n");
+            printf("cmd is sent\n");
             me3616.event = ME3616_NORMAL;
             // printf("me3616.event = %d",me3616.event);
             // me3616.cur_obj = -1;

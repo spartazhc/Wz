@@ -69,8 +69,16 @@ int me3616_sleep_config(int mode)
 }
 
 char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid){
-    sprintf(dst, "AT+MIPLOBSERVERSP=0,%s\r\n", msgid);
+    sprintf(dst, "AT+MIPLOBSERVERSP=0,%s,1\r\n", msgid);
     return dst;
 }
+
+char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring){
+    sprintf(dst, "AT+MIPLDISCOVERRSP=0,%s,1,%d,%s\r\n", msgid, 
+                            strlen(valuestring), valuestring);
+    return dst;
+}
+
+
 
 

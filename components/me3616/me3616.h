@@ -66,5 +66,5 @@ void me3616_wake_up(void);
 
 int me3616_sleep_config(int mode);
 char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid);
-
+char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring);
 #endif  
