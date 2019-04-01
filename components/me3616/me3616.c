@@ -9,12 +9,12 @@
 // me3616_event_t* me3616 = NULL;
 #define GPIO_PWR_ME3616     4
 #define GPIO_RESET_ME3616   0
-me3616_event_t me3616 = {ME3616_NORMAL, -1, 0, 0, 0, 0, 0};
+me3616_event_t me3616 = {0, 0, 0, 0};
 me3616_obj_t obj[ME3616_OBJ_NUM] = {
-    {"3301", 0, 0, 0, "", ""},
-    {"3303", 0, 0, 0, "", ""},
-    {"3304", 0, 0, 0, "", ""},
-    {"3323", 0, 0, 0, "", ""}
+    {"3301", 0, 0, 0, 0, 0, ""},
+    {"3303", 0, 0, 0, 0, 0, ""},
+    {"3304", 0, 0, 0, 0, 0, ""},
+    {"3323", 0, 0, 0, 0, 0, ""}
 };
 bool flag_ok = 0;
 
@@ -111,5 +111,13 @@ char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objec
 // me3616_onenet_miplread_rsp(cmd, msgid, "3303", 5700,4,"3.3",0);
 
 
-
+void update_max_min(me3616_obj_t obj, float new_value){
+    if (new_value > obj.max) {
+        obj.max = new_value;
+    }
+    if (new_value < obj.min) {
+        obj.min = new_value;
+    }
+    
+}
 

@@ -43,26 +43,29 @@
 typedef struct {
     char id[10];
     float value;
+    float max;
+    float min;
     bool observe;
     bool discover;
     char msgid_observe[10];
-    char msgid_discover[10];
+    // char msgid_discover[10];
 } me3616_obj_t;
 
 
 typedef struct {
-    int event;      // ME3616_EVENT_
-    int cur_obj;    // save current obj index
+    // int event;      // ME3616_EVENT_
+    // int cur_obj;    // save current obj index
     // char args[10];  // args for ME3616_EVENT_
     bool flag_ip;
     bool flag_miplopen;
     bool upload_en;
-    bool flag_write;
-    int observe_count;
+    // bool flag_write;
+    // int observe_count;
     int discover_count;
 } me3616_event_t;
 
 
+void update_max_min(me3616_obj_t obj, float new_value);
 
 int me3616_send_cmd(char* str, bool flag_ok, int waitms);
 

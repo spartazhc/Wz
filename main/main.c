@@ -318,6 +318,9 @@ void bmp280_read()
             obj[1].value = temperature;
             obj[2].value = humidity;
             obj[3].value = pressure;
+            update_max_min(obj[1], temperature);
+            update_max_min(obj[2], humidity);
+            update_max_min(obj[3], pressure);
         }
         
         
@@ -364,44 +367,6 @@ void max44009_task()
 		}
 	}
 }
-// void max44009_read(void *pvParameters)
-// {
-//     float lux;
-//     uint8_t lux_raw;
-//     while(1)
-//     {
-//         vTaskDelay(1000 / portTICK_PERIOD_MS);
-        
-//         if (max44009_read_float(&dev_m, &lux, &lux_raw) != ESP_OK)
-//         {
-//             printf("Temperature/pressure reading failed\n");
-//             continue;
-//         }
-//         printf("Lux: %.3f\n", lux);
-//     }
-// }
-
-// void max44009_th_test(void *pvParameters)
-// {
-//     float lux;
-//     uint8_t lux_raw;
-//     while(1)
-//     {
-//         vTaskDelay(2000 / portTICK_PERIOD_MS);
-//         if (max44009_read_float(&dev_m, &lux, &lux_raw) != ESP_OK)
-//         {
-//             printf("Temperature/pressure reading failed\n");
-//         }
-//         printf("init Lux: %.3f\n", lux);
-//         if (max44009_set_threshold_etc(&dev_m, &params_m, lux, lux_raw) != ESP_OK)
-//         {
-//             printf("Threshold setting failed\n");
-//         }
-
-//         max44009_read_regs(&dev_m);
-//     }
-    
-// }
 
 
 
@@ -549,14 +514,20 @@ void me3616_getevent(const char * data)
             if(!strcmp(objid, "3303")) {
                 float2char(temperature, value);
                 obj[1].value = temperature;
+                update_max_min(obj[1], temperature);
             } else if(!strcmp(objid, "3304")) {
                 float2char(humidity, value);
                 obj[2].value = humidity;
+                update_max_min(obj[2], humidity);
             } else if(!strcmp(objid, "3323")) {
                 float2char(pressure, value);
                 obj[3].value = pressure;
+                update_max_min(obj[3], pressure);
             } 
-        }
+        } 
+        // else if (!strcmp(objid, "3301")) {
+
+        // }
         me3616_onenet_miplread_rsp(cmd, msgid, objid, resourceid, TYPE_FLOAT, value, 0);
         uart_sendstring(UART_NUM_1, cmd);
         vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -570,66 +541,66 @@ void me3616_getevent(const char * data)
         return;
         // printf("event: get_ip\n");
     } else {
-        me3616.event = ME3616_NORMAL;    // set to ME3616_NORMAL
+        // me3616.event = ME3616_NORMAL;    // set to ME3616_NORMAL
         return;
     }
     return;   
 }
 //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
 // +MIPLDISCOVER: 0, 15321, 3303
-void me3616_response(const char* data)
-{
-    // const char* miplobserve = "MIPLOBSERVE";
-    char cmd[80];
-    //me3616_event_t* me3616 = get_me3616();
+// void me3616_response(const char* data)
+// {
+//     // const char* miplobserve = "MIPLOBSERVE";
+//     char cmd[80];
+//     //me3616_event_t* me3616 = get_me3616();
 
-    switch (me3616.event)
-    {
-        case ME3616_NORMAL:
-            break;
-        // when RSP, only msgid is needed
-        case ME3616_OBSERVE:
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            // strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
-            // strcat(cmd, obj[me3616.cur_obj].msgid_observe);
-            // strcat(cmd, ",1\r\n");
-            me3616_onenet_miplobserve_rsp(cmd, obj[me3616.cur_obj].msgid_observe);
-            uart_sendstring(UART_NUM_1, cmd);
-            me3616.event = ME3616_NORMAL;
-            // me3616.cur_obj = -1;
-            me3616.observe_count++;
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            break;
-            // AT+MIPLOBSERVERSP=0, ,1
-            // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
-        case ME3616_DISCOVER:
-            // printf("in ME3616_DISCOVER\n");
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "\"5700;5601;5602\"");
-            // strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-            // strcat(cmd, obj[me3616.cur_obj].msgid_discover);
-            // strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
-            // printf("make cmd: %s\n",cmd);
-            uart_sendstring(UART_NUM_1, cmd);
-            printf("cmd is sent\n");
-            me3616.event = ME3616_NORMAL;
-            // printf("me3616.event = %d",me3616.event);
-            // me3616.cur_obj = -1;
-            me3616.discover_count++;
-            // printf("discover_count = %d",me3616.discover_count);
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-            // printf("hello~\n");
-            break;
-        case ME3616_IP_CONNECTED:
-            me3616.flag_ip = 1;
-            break;
-        case ME3616_REG_SUCCESS:
-            me3616.flag_miplopen = 1;
-            break;
-        default:
-            break;
-    }
-}
+//     switch (me3616.event)
+//     {
+//         case ME3616_NORMAL:
+//             break;
+//         // when RSP, only msgid is needed
+//         case ME3616_OBSERVE:
+//             vTaskDelay(100 / portTICK_PERIOD_MS);
+//             // strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
+//             // strcat(cmd, obj[me3616.cur_obj].msgid_observe);
+//             // strcat(cmd, ",1\r\n");
+//             me3616_onenet_miplobserve_rsp(cmd, obj[me3616.cur_obj].msgid_observe);
+//             uart_sendstring(UART_NUM_1, cmd);
+//             me3616.event = ME3616_NORMAL;
+//             // me3616.cur_obj = -1;
+//             me3616.observe_count++;
+//             vTaskDelay(100 / portTICK_PERIOD_MS);
+//             break;
+//             // AT+MIPLOBSERVERSP=0, ,1
+//             // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
+//         case ME3616_DISCOVER:
+//             // printf("in ME3616_DISCOVER\n");
+//             vTaskDelay(100 / portTICK_PERIOD_MS);
+//             me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "\"5700;5601;5602\"");
+//             // strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
+//             // strcat(cmd, obj[me3616.cur_obj].msgid_discover);
+//             // strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
+//             // printf("make cmd: %s\n",cmd);
+//             uart_sendstring(UART_NUM_1, cmd);
+//             printf("cmd is sent\n");
+//             me3616.event = ME3616_NORMAL;
+//             // printf("me3616.event = %d",me3616.event);
+//             // me3616.cur_obj = -1;
+//             me3616.discover_count++;
+//             // printf("discover_count = %d",me3616.discover_count);
+//             vTaskDelay(100 / portTICK_PERIOD_MS);
+//             // printf("hello~\n");
+//             break;
+//         case ME3616_IP_CONNECTED:
+//             me3616.flag_ip = 1;
+//             break;
+//         case ME3616_REG_SUCCESS:
+//             me3616.flag_miplopen = 1;
+//             break;
+//         default:
+//             break;
+//     }
+// }
 
 /**
  * uart0:   pc  -- esp32
