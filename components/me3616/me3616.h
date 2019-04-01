@@ -45,6 +45,8 @@ typedef struct {
     float value;
     float max;
     float min;
+    bool max_flag;
+    bool min_flag;
     bool observe;
     bool discover;
     char msgid_observe[10];
@@ -65,7 +67,7 @@ typedef struct {
 } me3616_event_t;
 
 
-void update_max_min(me3616_obj_t obj, float new_value);
+int update_value(me3616_obj_t obj, float new_value);
 
 int me3616_send_cmd(char* str, bool flag_ok, int waitms);
 
@@ -76,10 +78,15 @@ void me3616_wake_up(void);
 int me3616_sleep_config(int mode);
 char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid);
 char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring);
+
+char* me3616_onenet_miplnotify_float(char* dst, const char* msgid, const char* objectid,
+    int resourceid, float value, int index);
 char* me3616_onenet_miplnotify(char* dst, const char* msgid, const char* objectid,
     int resourceid, int valuetype, const char *value, int index);
 
 char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objectid, 
                         const char* resourceid, int valuetype,
                         const char *value, int index);
+char* me3616_onenet_miplread_rsp_float(char* dst, const char* msgid, const char* objectid, 
+                        const char* resourceid, float value, int index);                 
 #endif  

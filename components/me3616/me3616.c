@@ -11,10 +11,10 @@
 #define GPIO_RESET_ME3616   0
 me3616_event_t me3616 = {0, 0, 0, 0};
 me3616_obj_t obj[ME3616_OBJ_NUM] = {
-    {"3301", 0, 0, 0, 0, 0, ""},
-    {"3303", 0, 0, 0, 0, 0, ""},
-    {"3304", 0, 0, 0, 0, 0, ""},
-    {"3323", 0, 0, 0, 0, 0, ""}
+    {"3301", 0, 0, 0, 0, 0, 0, 0, ""},
+    {"3303", 0, 0, 0, 0, 0, 0, 0, ""},
+    {"3304", 0, 0, 0, 0, 0, 0, 0, ""},
+    {"3323", 0, 0, 0, 0, 0, 0, 0, ""}
 };
 bool flag_ok = 0;
 
@@ -89,6 +89,13 @@ char* me3616_onenet_miplnotify(char* dst, const char* msgid, const char* objecti
     return dst;
 }
 
+char* me3616_onenet_miplnotify_float(char* dst, const char* msgid, const char* objectid,
+    int resourceid, float value, int index){
+    sprintf(dst, "AT+MIPLNOTIFY=0,%s,%s,0,%d,%d,%d,%.2f,%d,0\r\n", msgid, objectid,
+        resourceid, 4, 4, value, index);
+    return dst;
+}
+
 
 char* me3616_onenet_miplupdate(char* dst, int mode){
     sprintf(dst, "AT+MIPLUPDATE=0,3600,%d\r\n", mode);
@@ -108,16 +115,29 @@ char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objec
 	return dst;
 }
 
+char* me3616_onenet_miplread_rsp_float(char* dst, const char* msgid, const char* objectid, 
+                        const char* resourceid, float value, int index)
+{
+	sprintf(dst, "AT+MIPLREADRSP=0,%s,%d,%s,%d,%s,%d,%d,%.2f,%d,%d,\r\n", msgid, 1, objectid, 0, resourceid, 4, 4, value, index,0);
+
+	return dst;
+}
+
 // me3616_onenet_miplread_rsp(cmd, msgid, "3303", 5700,4,"3.3",0);
 
-
-void update_max_min(me3616_obj_t obj, float new_value){
+/**return   0：no update;
+ *          1: max update;
+ *          2: min update;
+ */
+int update_value(me3616_obj_t obj, float new_value){
     if (new_value > obj.max) {
         obj.max = new_value;
+        return 1;
     }
     if (new_value < obj.min) {
         obj.min = new_value;
+        return 2;
     }
-    
+    return 0;
 }
 

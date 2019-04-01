@@ -297,7 +297,9 @@ void init_me3616()
 }
 void bmp280_read()
 {
-    float pressure=0, temperature=0, humidity=0;
+    // float pressure=0, temperature=0, humidity=0;
+    float data[3] = {0};
+    // int ret = 0;
     while (1)
     {
         vTaskDelay(20*1000  / portTICK_PERIOD_MS);
@@ -306,24 +308,26 @@ void bmp280_read()
             printf("Force measurement failed\n");
             continue;
         }
-        if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+        // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+        if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
         {
             printf("Temperature/pressure reading failed\n");
             continue;
         }
 
-        printf("Pres: %.2f Pa, Temp: %.2f C, Hum: %.2f%%\n", pressure, temperature, humidity);
+        printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
         if (me3616.discover_count >= 4) {
-            obj[1].value = temperature;
-            obj[2].value = humidity;
-            obj[3].value = pressure;
-            update_max_min(obj[1], temperature);
-            update_max_min(obj[2], humidity);
-            update_max_min(obj[3], pressure);
+            /**
+             * obj[1]: temperature;
+             * obj[2]: humidity;
+             * obj[3]: pressure;
+             */
+            for (int i = 0; i < 3; ++i) {
+                obj[i+1].value = data[i];
+                update_value(obj[i+1], data[i]);
+            }
         }
-        
-        
     }
 }
 
@@ -454,7 +458,6 @@ void me3616_getevent(const char * data)
     char objid[10];
     char msgid[10];
     char resourceid[10];
-    char value[15];
     if (is_message_in_str(data, "OK")) {
         flag_ok = 1;
     }
@@ -497,38 +500,43 @@ void me3616_getevent(const char * data)
                 break;
             }
         }
-    } else if (is_message_in_str(data, "MIPLREAD:")) {
+    } else if (is_message_in_str(data, "+MIPLREAD:")) {
         // 现在我返回的类型似乎都是float 
         // +MIPLREAD: 0, 65313, 3303, 0, 5700
         // AT+MIPLREADRSP=0,65313,1,3303,0,5700,4,4,20.123,0,0
+        int id = -1;
+        int ret = 0;
         mystrcpy(data, msgid, 1);
         mystrcpy(data, objid, 2);// get object id
-        
         mystrcpy(data, resourceid, 4);
         resourceid[4] = '\0';
         // if object is in bme280
-        if (!strcmp(objid, "3303") || !strcmp(objid, "3304") || !strcmp(objid, "3323")) {
-            float pressure=0, temperature=0, humidity=0;
+        if (!strcmp(objid, "3303")) id = 1;
+        if (!strcmp(objid, "3304")) id = 2;
+        if (!strcmp(objid, "3323")) id = 3;
+        if (id == 1 || id == 2 || id == 3) {
+            float data[3];
             bmp280_force_measurement(&dev_b);
-            bmp280_read_float(&dev_b, &temperature, &pressure, &humidity);
-            if(!strcmp(objid, "3303")) {
-                float2char(temperature, value);
-                obj[1].value = temperature;
-                update_max_min(obj[1], temperature);
-            } else if(!strcmp(objid, "3304")) {
-                float2char(humidity, value);
-                obj[2].value = humidity;
-                update_max_min(obj[2], humidity);
-            } else if(!strcmp(objid, "3323")) {
-                float2char(pressure, value);
-                obj[3].value = pressure;
-                update_max_min(obj[3], pressure);
-            } 
+            bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]);
+            printf("READRSP: temp: %.2f, humi: %.2f, pres:%.2f\n", data[0], data[1], data[2]);
+            for (int i = 1; i < 4; ++i){
+                obj[i].value = data[i-1];
+                ret = update_value(obj[i], data[i-1]);
+                if (ret == 1) { // max
+                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                    obj[i].id, 5602, data[i-1], 0);
+                    uart_sendstring(UART_NUM_1, cmd);
+                    vTaskDelay(100 / portTICK_PERIOD_MS);
+                } else if (ret == 2) { // min
+                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                    obj[i].id, 5601, data[i-1], 0);
+                    uart_sendstring(UART_NUM_1, cmd);
+                    vTaskDelay(100 / portTICK_PERIOD_MS);
+                }
+                ret = 0; // reset ret;
+            }
         } 
-        // else if (!strcmp(objid, "3301")) {
-
-        // }
-        me3616_onenet_miplread_rsp(cmd, msgid, objid, resourceid, TYPE_FLOAT, value, 0);
+        me3616_onenet_miplread_rsp_float(cmd, msgid, objid, resourceid, obj[id].value, 0);
         uart_sendstring(UART_NUM_1, cmd);
         vTaskDelay(100 / portTICK_PERIOD_MS);
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
@@ -644,42 +652,50 @@ void me3616_upload()
 {
     char cmd[50];
     char buf[10];
+    int max_count = 0;
     // float num_test = 13.33;
     //me3616_event_t* me3616 = get_me3616();
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
+        max_count++;
         if (!me3616.upload_en && me3616.discover_count == 4) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");
 
         }
         if (me3616.flag_miplopen && me3616.upload_en) {
-            
             for(size_t i = 0; i < ME3616_OBJ_NUM; i++)
             {
                 // num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
                 float2char(obj[i].value, buf);
-                // strcpy(cmd, "AT+MIPLNOTIFY=0,");
-                // strcat(cmd, obj[i].msgid_observe);
-                // strcat(cmd, ",");
-                // strcat(cmd, obj[i].id);
-                // strcat(cmd, ",0,5700,4,4,"); // maybe max/min need manually upload
-                // // float2char(num_test, buf);
-                // // printf("num = %.2f, buf = %s \n", num_test, buf);
-                
-                
-                // strcat(cmd, buf);
-                // strcat(cmd, ",0,0\r\n"); // next time try config index bit
-                // printf("%s", cmd);
                 me3616_onenet_miplnotify(cmd, obj[i].msgid_observe, obj[i].id,
                  5700, 4, buf, 0);
                 uart_sendstring(UART_NUM_1, cmd);
                 vTaskDelay(100 / portTICK_PERIOD_MS);
             }
-            
+            if (max_count == 10) {
+                max_count = 0; // reset counter
+                for (int i = 1; i < 4; ++i) { //i=1,2,3
+                    if (obj[i].max_flag) { // max
+                        obj[i].max_flag = 0;
+                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                        obj[i].id, 5602, obj[i].max, 0);
+                        uart_sendstring(UART_NUM_1, cmd);
+                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                    }
+                    if (obj[i].min_flag) { // min
+                        obj[i].min_flag = 0;
+                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                        obj[i].id, 5601, obj[i].min, 0);
+                        uart_sendstring(UART_NUM_1, cmd);
+                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                    }
+                }
+            }
         }
+
     }
 }
