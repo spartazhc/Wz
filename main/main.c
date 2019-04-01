@@ -9,28 +9,50 @@
 #include "driver/uart.h"
 #include <string.h>
 #include <me3616.h>
-
+//adc
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
+#include "rom/ets_sys.h"
+// GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_INTR_IO    GPIO_NUM_5
-
-#define ESP_INTR_FLAG_DEFAULT   0
+#define GPIO_INTR_IO            5  // INTR pin for max44009
+#define ESP_INTR_FLAG_DEFAULT   0   
+#define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
+#define GPIO_UV_EN              0
 // UART
 #define ECHO_TEST_TXD  (GPIO_NUM_17)
 #define ECHO_TEST_RXD  (GPIO_NUM_16)
 #define ECHO_TEST_RTS  (UART_PIN_NO_CHANGE)
 #define ECHO_TEST_CTS  (UART_PIN_NO_CHANGE)
 #define BUF_SIZE (1024)
+// adc 
+#define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
+#define NO_OF_SAMPLES       1          //Multisampling
+// gp2y time define in microsecoend !
+#define GP2Y_SAMPLE_TIME    280
+#define GP2Y_DELTA_TIME     40
+#define GP2Y_SLEEP_TIME     9680
 
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
 extern me3616_event_t me3616;
 extern bool flag_ok ;
 SemaphoreHandle_t xSemaphore = NULL;
+esp_err_t res;
+
+//bmp280 & max44009
 bmp280_params_t params_b;
 max44009_params_t params_m;
 bmp280_t dev_b;
 max44009_t dev_m;
-esp_err_t res;
+
+// adc
+static esp_adc_cal_characteristics_t *adc_chars;
+static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
+static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
+// static const adc_channel_t channel3 = ADC_CHANNEL_4;     //GPIO32
+static const adc_atten_t atten = ADC_ATTEN_DB_11;
+static const adc_unit_t unit = ADC_UNIT_1;
 
 // interrupt service routine, called when the button is pressed
 void IRAM_ATTR max44009_isr_handler(void* arg) {
@@ -57,70 +79,77 @@ void init_max44009();
 void init_me3616();
 void bmp280_read();
 void max44009_task();
+void gp2y1014au0f_read();
+void ml8511_read();
 void me3616_getevent(const char * data);
 void me3616_response(const char * data);
 void uart_forward();
 void me3616_upload();
+static void check_efuse();
+static void print_char_val_type(esp_adc_cal_value_t val_type);
+uint32_t analog_read(adc_channel_t channel);
+void init_adc();
+
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
 // void max44009_read(void *pvParameters);
 // void max44009_th_test(void *pvParameters);
 
-void me3616_test(){
-    int ret = 0;
-    me3616_power_on();
-    printf("Doiot System Start.\r\n");
-    // wait until internet connect success
-    while (!me3616.flag_ip){
-        vTaskDelay(1000 / portTICK_PERIOD_MS); 
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 提示符
-    ret = me3616_send_cmd("AT\r\n", flag_ok, 300);
-    printf("**ret = %d\n", ret);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询模块识别信息
-    ret = me3616_send_cmd("ATI\r\n", flag_ok, 300);
-    printf("**ret = %d\n", ret);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询IMEI号
-    ret = me3616_send_cmd("AT+CGSN=1\r\n", flag_ok, 300);
-    printf("**ret = %d\n", ret);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询IMSI号
-    me3616_send_cmd("AT+CIMI\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询信号强度
-    me3616_send_cmd("AT+CSQ\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询网络附着状态
-    me3616_send_cmd("AT+CEREG?\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+// void me3616_test(){
+//     int ret = 0;
+//     me3616_power_on();
+//     printf("Doiot System Start.\r\n");
+//     // wait until internet connect success
+//     while (!me3616.flag_ip){
+//         vTaskDelay(1000 / portTICK_PERIOD_MS); 
+//     }
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 提示符
+//     ret = me3616_send_cmd("AT\r\n", flag_ok, 300);
+//     printf("**ret = %d\n", ret);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 查询模块识别信息
+//     ret = me3616_send_cmd("ATI\r\n", flag_ok, 300);
+//     printf("**ret = %d\n", ret);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 查询IMEI号
+//     ret = me3616_send_cmd("AT+CGSN=1\r\n", flag_ok, 300);
+//     printf("**ret = %d\n", ret);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 查询IMSI号
+//     me3616_send_cmd("AT+CIMI\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 查询信号强度
+//     me3616_send_cmd("AT+CSQ\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 查询网络附着状态
+//     me3616_send_cmd("AT+CEREG?\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
     
-    // 创建onenet平台
-    me3616_send_cmd("AT+MIPLCREATE\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 新增object id:3303(temperature)
-    me3616_send_cmd("AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    me3616_send_cmd("AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    me3616_send_cmd("AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 注册onenet 平台  这一步比较费时间，要多delay
-    me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n", flag_ok, 300);
-    while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
-    // vTaskDelay(100 / portTICK_PERIOD_MS);
-}
+//     // 创建onenet平台
+//     me3616_send_cmd("AT+MIPLCREATE\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 新增object id:3303(temperature)
+//     me3616_send_cmd("AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     me3616_send_cmd("AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     me3616_send_cmd("AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
+//     vTaskDelay(100 / portTICK_PERIOD_MS);
+//     // 注册onenet 平台  这一步比较费时间，要多delay
+//     me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n", flag_ok, 300);
+//     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
+//     // vTaskDelay(100 / portTICK_PERIOD_MS);
+// }
 
 
 void app_main()
 {
-    // //me3616_event_t* me3616 = get_me3616();
-
     // create the binary semaphore
 	xSemaphore = xSemaphoreCreateBinary();
     init_gpio();
+    init_adc();
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
     // me3616_test();
@@ -135,22 +164,101 @@ void app_main()
     init_me3616();
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-	
 	// attach the interrupt service routine
 	gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
 }
 
 
+static void check_efuse()
+{
+    //Check TP is burned into eFuse
+    if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_TP) == ESP_OK) {
+        printf("eFuse Two Point: Supported\n");
+    } else {
+        printf("eFuse Two Point: NOT supported\n");
+    }
+
+    //Check Vref is burned into eFuse
+    if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) == ESP_OK) {
+        printf("eFuse Vref: Supported\n");
+    } else {
+        printf("eFuse Vref: NOT supported\n");
+    }
+}
+
+static void print_char_val_type(esp_adc_cal_value_t val_type)
+{
+    if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP) {
+        printf("Characterized using Two Point Value\n");
+    } else if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
+        printf("Characterized using eFuse Vref\n");
+    } else {
+        printf("Characterized using Default Vref\n");
+    }
+}
+
+/**
+ * depend on 
+ * static esp_adc_cal_characteristics_t *adc_chars;
+ * static const adc_channel_t channel = ADC_CHANNEL_6;
+ */
+uint32_t analog_read(adc_channel_t channel)
+{
+    uint32_t adc_reading = 0;
+    //Multisampling
+    for (int i = 0; i < NO_OF_SAMPLES; i++) {
+        if (unit == ADC_UNIT_1) {
+            adc_reading += adc1_get_raw((adc1_channel_t)channel);
+        } else {
+            int raw;
+            adc2_get_raw((adc2_channel_t)channel, ADC_WIDTH_BIT_12, &raw);
+            adc_reading += raw;
+        }
+    }
+    adc_reading /= NO_OF_SAMPLES;
+    //Convert adc_reading to voltage in mV
+    uint32_t voltage = esp_adc_cal_raw_to_voltage(adc_reading, adc_chars);
+    printf("Raw: %d\tVoltage: %dmV\n", adc_reading, voltage);
+    return voltage;
+}
+
+void init_adc()
+{
+    //Check if Two Point or Vref are burned into eFuse
+    check_efuse();
+
+    //Configure ADC
+    if (unit == ADC_UNIT_1) {
+        adc1_config_width(ADC_WIDTH_BIT_12);
+        adc1_config_channel_atten(channel1, atten);
+        adc1_config_channel_atten(channel2, atten);
+    } else {
+        // adc2_config_channel_atten((adc2_channel_t)channel, atten);
+    }
+
+    //Characterize ADC
+    adc_chars = calloc(1, sizeof(esp_adc_cal_characteristics_t));
+    esp_adc_cal_value_t val_type = esp_adc_cal_characterize(unit, atten, ADC_WIDTH_BIT_12, DEFAULT_VREF, adc_chars);
+    print_char_val_type(val_type);
+}
+
+/**
+ * init gpio
+ * GPIO_INTR_IO         | max44009 
+ * GPIO_LED_CONTROL     | gp2y1014au
+ */
 void init_gpio()
 {
     //max44009 intr pin
     gpio_config_t io_conf;
-    //enable interrupt negedge
+    //enable interrupt as negedge
     io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    //set as output mode
+    //set as input mode
     io_conf.mode = GPIO_MODE_INPUT;
     //bit mask of the pins that you want to set,e.g.GPIO18/19
     io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
@@ -160,17 +268,17 @@ void init_gpio()
     io_conf.pull_up_en = 1;
     //configure GPIO with the given settings
     gpio_config(&io_conf);
-    //disable interrupt
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    //set as output mode
     io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = ((1ULL << GPIO_PWR_ME3616)|(1ULL << GPIO_RESET_ME3616));
-    //disable pull-down mode
+    io_conf.pin_bit_mask = ((1ULL << GPIO_PWR_ME3616)|(1ULL << GPIO_RESET_ME3616)|(1ULL << GPIO_UV_EN));
     io_conf.pull_down_en = 1;
-    //enable pull-up mode
     io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
+    gpio_config(&io_conf);
+    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pin_bit_mask = ((1ULL << GPIO_LED_CONTROL));
+    io_conf.pull_down_en = 0;
+    io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
 }
 
@@ -194,8 +302,10 @@ void init_uart()
     uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
 }
 
+
 void init_bme280()
 {
+    // bmp280_init_default_params(&params_b);
     bmp280_init_weather_params(&params_b);   
     
     while (bmp280_init_desc(&dev_b, BMP280_I2C_ADDRESS_0, 0, SDA_GPIO, SCL_GPIO) != ESP_OK)
@@ -554,61 +664,6 @@ void me3616_getevent(const char * data)
     }
     return;   
 }
-//+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
-// +MIPLDISCOVER: 0, 15321, 3303
-// void me3616_response(const char* data)
-// {
-//     // const char* miplobserve = "MIPLOBSERVE";
-//     char cmd[80];
-//     //me3616_event_t* me3616 = get_me3616();
-
-//     switch (me3616.event)
-//     {
-//         case ME3616_NORMAL:
-//             break;
-//         // when RSP, only msgid is needed
-//         case ME3616_OBSERVE:
-//             vTaskDelay(100 / portTICK_PERIOD_MS);
-//             // strcpy(cmd, "AT+MIPLOBSERVERSP=0,");
-//             // strcat(cmd, obj[me3616.cur_obj].msgid_observe);
-//             // strcat(cmd, ",1\r\n");
-//             me3616_onenet_miplobserve_rsp(cmd, obj[me3616.cur_obj].msgid_observe);
-//             uart_sendstring(UART_NUM_1, cmd);
-//             me3616.event = ME3616_NORMAL;
-//             // me3616.cur_obj = -1;
-//             me3616.observe_count++;
-//             vTaskDelay(100 / portTICK_PERIOD_MS);
-//             break;
-//             // AT+MIPLOBSERVERSP=0, ,1
-//             // AT+MIPLDISCOVERRSP=0, ,1,14,"5700;5601;5602"
-//         case ME3616_DISCOVER:
-//             // printf("in ME3616_DISCOVER\n");
-//             vTaskDelay(100 / portTICK_PERIOD_MS);
-//             me3616_onenet_mipldiscover_rsp(cmd, obj[me3616.cur_obj].msgid_discover, "\"5700;5601;5602\"");
-//             // strcpy(cmd, "AT+MIPLDISCOVERRSP=0,");
-//             // strcat(cmd, obj[me3616.cur_obj].msgid_discover);
-//             // strcat(cmd, ",1,14,\"5700;5601;5602\"\r\n"); // specific attribute for object
-//             // printf("make cmd: %s\n",cmd);
-//             uart_sendstring(UART_NUM_1, cmd);
-//             printf("cmd is sent\n");
-//             me3616.event = ME3616_NORMAL;
-//             // printf("me3616.event = %d",me3616.event);
-//             // me3616.cur_obj = -1;
-//             me3616.discover_count++;
-//             // printf("discover_count = %d",me3616.discover_count);
-//             vTaskDelay(100 / portTICK_PERIOD_MS);
-//             // printf("hello~\n");
-//             break;
-//         case ME3616_IP_CONNECTED:
-//             me3616.flag_ip = 1;
-//             break;
-//         case ME3616_REG_SUCCESS:
-//             me3616.flag_miplopen = 1;
-//             break;
-//         default:
-//             break;
-//     }
-// }
 
 /**
  * uart0:   pc  -- esp32
@@ -645,6 +700,68 @@ void uart_forward()
             // me3616_response((const char *) data1);
             // printf("len1 end\n");
         }
+    }
+}
+void gp2y1014au0f_read()
+{
+    int voltage;
+    float dustDensity;
+
+    while(1)
+    {
+        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_LED_CONTROL, 0);
+        // printf("GPIO_25 set low\n");
+        ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
+        
+        // printf("analog_read start\n");
+        voltage = analog_read(channel1);
+        // printf("analog_read end\n");
+
+        ets_delay_us(GP2Y_DELTA_TIME);
+        // printf("delay delta finished\n");
+        
+        gpio_set_level(GPIO_LED_CONTROL, 1);
+        // printf("GPIO_25 set high\n");
+        ets_delay_us(GP2Y_SLEEP_TIME);
+
+        // printf("delay sleep finished\n");
+
+        dustDensity = 0.17 * voltage / 1000 - 0.1;
+
+        if (dustDensity < 0) dustDensity = 0;
+
+        printf("Dust Density: %.2f mg/m3\n", dustDensity);
+    }
+}
+float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
+{
+  return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void ml8511_read()
+{
+    int uvLevel;//, refLevel;
+
+    float outputVoltage, uvIntensity;
+    while(1)
+    {
+        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_UV_EN, 1);
+        vTaskDelay(100 / portTICK_PERIOD_MS);
+
+        uvLevel = analog_read(channel2);
+        printf("uvLevel = %d\n", uvLevel);
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+        gpio_set_level(GPIO_UV_EN, 0);
+
+        // outputVoltage = 3.3 / refLevel * uvLevel;
+        if (uvLevel <= 990) uvLevel = 990;
+        outputVoltage =  (float)uvLevel / 1000;
+        printf("outputVoltage = %.2f\n", outputVoltage);
+        uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
+
+        printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
     }
 }
 
