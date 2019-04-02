@@ -161,12 +161,12 @@ void app_main()
     init_bme280();
     init_max44009();
     // initiate me3616 after start uart_forward task ()
-    init_me3616();
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // init_me3616();
+    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, 1);
+    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	// attach the interrupt service routine
@@ -254,20 +254,8 @@ void init_adc()
  */
 void init_gpio()
 {
-    //max44009 intr pin
     gpio_config_t io_conf;
-    //enable interrupt as negedge
-    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    //set as input mode
-    io_conf.mode = GPIO_MODE_INPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
+    
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pin_bit_mask = ((1ULL << GPIO_PWR_ME3616)|(1ULL << GPIO_RESET_ME3616)|(1ULL << GPIO_UV_EN));
@@ -279,6 +267,18 @@ void init_gpio()
     io_conf.pin_bit_mask = ((1ULL << GPIO_LED_CONTROL));
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 1;
+    gpio_config(&io_conf);
+    //enable interrupt as negedge
+    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
+    //set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO18/19
+    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
     gpio_config(&io_conf);
 }
 
@@ -709,7 +709,7 @@ void gp2y1014au0f_read()
 
     while(1)
     {
-        vTaskDelay(5000 / portTICK_PERIOD_MS);
+        vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_LED_CONTROL, 0);
         // printf("GPIO_25 set low\n");
         ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
@@ -746,7 +746,7 @@ void ml8511_read()
     float outputVoltage, uvIntensity;
     while(1)
     {
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
+        vTaskDelay(1*60*1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 1);
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
