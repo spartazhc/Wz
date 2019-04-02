@@ -37,7 +37,7 @@
 #define TYPE_INTEGER    3
 #define TYPE_FLOAT      4
 #define TYPE_BOOL       5
-#define ME3616_OBJ_NUM 4
+#define ME3616_OBJ_NUM  6
 
 
 typedef struct {

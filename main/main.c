@@ -161,12 +161,12 @@ void app_main()
     init_bme280();
     init_max44009();
     // initiate me3616 after start uart_forward task ()
-    // init_me3616();
+    init_me3616();
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
+    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	// attach the interrupt service routine
@@ -399,6 +399,10 @@ void init_me3616()
     vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3300,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,0\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
@@ -427,7 +431,7 @@ void bmp280_read()
 
         printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        if (me3616.discover_count >= 4) {
+        if (me3616.discover_count >= ME3616_OBJ_NUM) {
             /**
              * obj[1]: temperature;
              * obj[2]: humidity;
@@ -469,9 +473,9 @@ void max44009_task()
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
-                if (me3616.upload_en) {
-                    obj[0].value = lux_f;
-                }
+                // update value in object
+                obj[0].value = lux_f;
+                update_value(obj[0], lux_f);
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
                 {
                     printf("Threshold setting failed\n");
@@ -616,39 +620,74 @@ void me3616_getevent(const char * data)
         // AT+MIPLREADRSP=0,65313,1,3303,0,5700,4,4,20.123,0,0
         int id = -1;
         int ret = 0;
+        int adc_read = 0;
+        float value[6];
         mystrcpy(data, msgid, 1);
         mystrcpy(data, objid, 2);// get object id
         mystrcpy(data, resourceid, 4);
         resourceid[4] = '\0';
-        // if object is in bme280
-        if (!strcmp(objid, "3303")) id = 1;
-        if (!strcmp(objid, "3304")) id = 2;
-        if (!strcmp(objid, "3323")) id = 3;
-        if (id == 1 || id == 2 || id == 3) {
-            float data[3];
+
+        if (!strcmp(objid, "3301")) id = 0;
+        else if (!strcmp(objid, "3303")) id = 1;
+        else if (!strcmp(objid, "3304")) id = 2;
+        else if (!strcmp(objid, "3323")) id = 3;
+        else if (!strcmp(objid, "3300")) id = 4;
+        else if (!strcmp(objid, "3325")) id = 5;
+
+        if (id == 1 || id == 2 || id == 3) {    //bme280
             bmp280_force_measurement(&dev_b);
-            bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]);
-            printf("READRSP: temp: %.2f, humi: %.2f, pres:%.2f\n", data[0], data[1], data[2]);
-            for (int i = 1; i < 4; ++i){
-                obj[i].value = data[i-1];
-                ret = update_value(obj[i], data[i-1]);
-                if (ret == 1) { // max
-                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                    obj[i].id, 5602, data[i-1], 0);
-                    uart_sendstring(UART_NUM_1, cmd);
-                    vTaskDelay(100 / portTICK_PERIOD_MS);
-                } else if (ret == 2) { // min
-                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                    obj[i].id, 5601, data[i-1], 0);
-                    uart_sendstring(UART_NUM_1, cmd);
-                    vTaskDelay(100 / portTICK_PERIOD_MS);
-                }
-                ret = 0; // reset ret;
-            }
-        } 
+            bmp280_read_float(&dev_b, &value[1], &value[3], &value[2]);
+            printf("READRSP: temp: %.2f, humi: %.2f, pres:%.2f\n", value[1], value[2], value[3]);
+            
+        } else if (id == 0) {   //max44009
+            // for reason that i use the intrupt way, it need to change mode to do this
+            // so now just do nothing;
+            value[0] = obj[0].value;//nothing
+        } else if (id == 4) {   //ml8511
+            gpio_set_level(GPIO_UV_EN, 1);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            adc_read = analog_read(channel2);
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            gpio_set_level(GPIO_UV_EN, 0);
+
+            if (adc_read <= 990) adc_read = 990;
+            value[4] = mapfloat((float)adc_read / 1000, 0.99, 2.9, 0.0, 15.0);
+            printf("READRSP：uv intensity: %.2f mw/cm^2\n", value[4]);
+        } else if (id == 5) {   //gp2y
+            gpio_set_level(GPIO_LED_CONTROL, 0);
+            ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
+            adc_read = analog_read(channel1);
+            ets_delay_us(GP2Y_DELTA_TIME);
+            gpio_set_level(GPIO_LED_CONTROL, 1);
+            
+            value[5] = 0.17 * adc_read / 1000 - 0.1;
+            if (value[5] < 0) value[5] = 0;
+            // update value in object
+            printf("READRSP：dust density: %.2f mg/m3\n", value[5]);
+        }
+        // update value and max & min
+        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
+            obj[i].value = value[i];
+            ret = update_value(obj[i], value[i]);
+        }
+        // make read response first
         me3616_onenet_miplread_rsp_float(cmd, msgid, objid, resourceid, obj[id].value, 0);
         uart_sendstring(UART_NUM_1, cmd);
         vTaskDelay(100 / portTICK_PERIOD_MS);
+        // then send notify of max & min
+        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
+            if (ret == 1) { // max
+                me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                obj[i].id, 5602, value[i], 0);
+                uart_sendstring(UART_NUM_1, cmd);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+            } else if (ret == 2) { // min
+                me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                obj[i].id, 5601, value[i], 0);
+                uart_sendstring(UART_NUM_1, cmd);
+                vTaskDelay(100 / portTICK_PERIOD_MS);
+            }
+        }
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
         // me3616.event = ME3616_REG_SUCCESS;
         me3616.flag_miplopen = 1;
@@ -730,7 +769,9 @@ void gp2y1014au0f_read()
         dustDensity = 0.17 * voltage / 1000 - 0.1;
 
         if (dustDensity < 0) dustDensity = 0;
-
+        // update value in object
+        obj[5].value = dustDensity;
+        update_value(obj[5], dustDensity);
         printf("Dust Density: %.2f mg/m3\n", dustDensity);
     }
 }
@@ -751,16 +792,18 @@ void ml8511_read()
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
         uvLevel = analog_read(channel2);
-        printf("uvLevel = %d\n", uvLevel);
+        // printf("uvLevel = %d\n", uvLevel);
         vTaskDelay(10 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 0);
 
         // outputVoltage = 3.3 / refLevel * uvLevel;
         if (uvLevel <= 990) uvLevel = 990;
         outputVoltage =  (float)uvLevel / 1000;
-        printf("outputVoltage = %.2f\n", outputVoltage);
+        // printf("outputVoltage = %.2f\n", outputVoltage);
         uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
-
+        // update value in object
+        obj[4].value = uvIntensity;
+        update_value(obj[4], uvIntensity);
         printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
     }
 }
@@ -777,7 +820,7 @@ void me3616_upload()
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
-        if (!me3616.upload_en && me3616.discover_count == 4) {
+        if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");
 
@@ -795,7 +838,7 @@ void me3616_upload()
             }
             if (max_count == 10) {
                 max_count = 0; // reset counter
-                for (int i = 1; i < 4; ++i) { //i=1,2,3
+                for (int i = 0; i < ME3616_OBJ_NUM; ++i) { 
                     if (obj[i].max_flag) { // max
                         obj[i].max_flag = 0;
                         me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
