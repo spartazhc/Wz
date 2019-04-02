@@ -11,12 +11,12 @@
 #define GPIO_RESET_ME3616   0
 me3616_event_t me3616 = {0, 0, 0, 0};
 me3616_obj_t obj[ME3616_OBJ_NUM] = {
-    {"3301", 0, 0, 0, 0, 0, 0, 0, ""}, //illuminance    max44009
-    {"3303", 0, 0, 0, 0, 0, 0, 0, ""}, //temperature    bme280
-    {"3304", 0, 0, 0, 0, 0, 0, 0, ""}, //humidity       bme28
-    {"3323", 0, 0, 0, 0, 0, 0, 0, ""}, //pressure       bme28
-    {"3300", 0, 0, 0, 0, 0, 0, 0, ""}, //ultraViolet    ml8511
-    {"3325", 0, 0, 0, 0, 0, 0, 0, ""}  //dust           gp2y 
+    {"3301", 0, 0, 0, 1, 1, 0, 0, ""}, //illuminance    max44009
+    {"3303", 0, 0, 0, 1, 1, 0, 0, ""}, //temperature    bme280
+    {"3304", 0, 0, 0, 1, 1, 0, 0, ""}, //humidity       bme28
+    {"3323", 0, 0, 0, 1, 1, 0, 0, ""}, //pressure       bme28
+    {"3300", 0, 0, 0, 1, 1, 0, 0, ""}, //ultraViolet    ml8511
+    {"3325", 0, 0, 0, 1, 1, 0, 0, ""}  //dust           gp2y 
 };
 bool flag_ok = 0;
 
@@ -125,19 +125,29 @@ char* me3616_onenet_miplread_rsp_float(char* dst, const char* msgid, const char*
 	return dst;
 }
 
+// +MIPLEXECUTE:0,22308,3303,0,5605,5, "reset"
+// AT+MIPLEXECUTERSP=0,22308,2
+char* me3616_onenet_miplexecute_rsp(char* dst, const char* msgid, int result){
+    sprintf(dst, "AT+MIPLEXEUTERSP=0,%s,%d\r\n", msgid, result);
+    return dst;
+}
+
 // me3616_onenet_miplread_rsp(cmd, msgid, "3303", 5700,4,"3.3",0);
 
 /**return   0：no update;
  *          1: max update;
  *          2: min update;
  */
-int update_value(me3616_obj_t obj, float new_value){
-    if (new_value > obj.max) {
-        obj.max = new_value;
+int update_value(me3616_obj_t* obj, float new_value){
+    obj->value = new_value;
+    if (new_value > obj->max) {
+        obj->max = new_value;
+        obj->max_flag = 1;
         return 1;
     }
-    if (new_value < obj.min) {
-        obj.min = new_value;
+    if (new_value < obj->min) {
+        obj->min = new_value;
+        obj->min_flag = 1;
         return 2;
     }
     return 0;

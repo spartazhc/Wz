@@ -347,6 +347,9 @@ void init_max44009()
         printf("Temperature/pressure reading failed\n");
     }
     printf("init Lux: %.3f\n", lux);
+    // init max & min
+    obj[0].max = lux;
+    obj[0].min = lux;
     if (max44009_set_threshold_etc(&dev_m, &params_m, lux, lux_raw) != ESP_OK)
     {
         printf("Threshold setting failed\n");
@@ -391,17 +394,17 @@ void init_me3616()
     uart_sendstring(UART_NUM_1, "AT+MIPLCREATE\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 新增object id:3303(temperature)
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3300,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3300,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,0\r\n");
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,1\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
@@ -438,8 +441,13 @@ void bmp280_read()
              * obj[3]: pressure;
              */
             for (int i = 0; i < 3; ++i) {
-                obj[i+1].value = data[i];
-                update_value(obj[i+1], data[i]);
+                // init max & min otherwise min will always be 0;
+                if (obj[i+1].max == 0 && obj[i+1].min == 0) {
+                    obj[i+1].max = data[i];
+                    obj[i+1].min = data[i];
+                }
+                // obj[i+1].value = data[i];
+                update_value(&obj[i+1], data[i]);
             }
         }
     }
@@ -474,8 +482,8 @@ void max44009_task()
                 }
                 printf("Lux: %.3f\n", lux_f);
                 // update value in object
-                obj[0].value = lux_f;
-                update_value(obj[0], lux_f);
+                // obj[0].value = lux_f;
+                update_value(&obj[0], lux_f);
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
                 {
                     printf("Threshold setting failed\n");
@@ -607,7 +615,7 @@ void me3616_getevent(const char * data)
                 // me3616 object operation
                 // printf("in if\n");
                 obj[i].discover = 1;    
-                me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602\"");
+                me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602;5605\"");
                 uart_sendstring(UART_NUM_1, cmd);
                 me3616.discover_count++;
                 vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -667,8 +675,8 @@ void me3616_getevent(const char * data)
         }
         // update value and max & min
         for (int i = 0; i < ME3616_OBJ_NUM; ++i){
-            obj[i].value = value[i];
-            ret = update_value(obj[i], value[i]);
+            // obj[i].value = value[i];
+            ret = update_value(&obj[i], value[i]);
         }
         // make read response first
         me3616_onenet_miplread_rsp_float(cmd, msgid, objid, resourceid, obj[id].value, 0);
@@ -687,6 +695,29 @@ void me3616_getevent(const char * data)
                 uart_sendstring(UART_NUM_1, cmd);
                 vTaskDelay(100 / portTICK_PERIOD_MS);
             }
+        }
+    } else if (is_message_in_str(data, "+MIPLEXECUTE:")) {
+        // +MIPLEXECUTE:0,22308,3303,0,5605,5, "reset"
+        // AT+MIPLEXECUTERSP=0,22308,2
+        int id = -1;
+        mystrcpy(data, msgid, 1);
+        mystrcpy(data, objid, 2);// get object id
+        mystrcpy(data, resourceid, 4);
+
+        if (!strcmp(objid, "3301")) id = 0;
+        else if (!strcmp(objid, "3303")) id = 1;
+        else if (!strcmp(objid, "3304")) id = 2;
+        else if (!strcmp(objid, "3323")) id = 3;
+        else if (!strcmp(objid, "3300")) id = 4;
+        else if (!strcmp(objid, "3325")) id = 5;
+
+        if(!strcmp(resourceid, "5605")) {
+            printf("clear max&min in id:%s\n", objid);
+            obj[id].max = obj[id].value;
+            obj[id].max = obj[id].value;
+            me3616_onenet_miplexecute_rsp(cmd, msgid, 2);
+            uart_sendstring(UART_NUM_1, cmd);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
     } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
         // me3616.event = ME3616_REG_SUCCESS;
@@ -770,8 +801,13 @@ void gp2y1014au0f_read()
 
         if (dustDensity < 0) dustDensity = 0;
         // update value in object
-        obj[5].value = dustDensity;
-        update_value(obj[5], dustDensity);
+        // obj[5].value = dustDensity;
+        // init max & min otherwise min will always be 0;
+        if (obj[5].max == 0 && obj[5].min == 0) {
+            obj[5].max = dustDensity;
+            obj[5].min = dustDensity;
+        }
+        update_value(&obj[5], dustDensity);
         printf("Dust Density: %.2f mg/m3\n", dustDensity);
     }
 }
@@ -802,8 +838,12 @@ void ml8511_read()
         // printf("outputVoltage = %.2f\n", outputVoltage);
         uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
         // update value in object
-        obj[4].value = uvIntensity;
-        update_value(obj[4], uvIntensity);
+        // obj[4].value = uvIntensity;
+        if (obj[4].max == 0 && obj[4].min == 0) {
+            obj[4].max = uvIntensity;
+            obj[4].min = uvIntensity;
+        }
+        update_value(&obj[4], uvIntensity);
         printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
     }
 }

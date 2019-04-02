@@ -67,7 +67,7 @@ typedef struct {
 } me3616_event_t;
 
 
-int update_value(me3616_obj_t obj, float new_value);
+int update_value(me3616_obj_t* obj, float new_value);
 
 int me3616_send_cmd(char* str, bool flag_ok, int waitms);
 
@@ -89,4 +89,6 @@ char* me3616_onenet_miplread_rsp(char* dst, const char* msgid, const char* objec
                         const char *value, int index);
 char* me3616_onenet_miplread_rsp_float(char* dst, const char* msgid, const char* objectid, 
                         const char* resourceid, float value, int index);                 
+
+char* me3616_onenet_miplexecute_rsp(char* dst, const char* msgid, int result);
 #endif  
