@@ -1,14 +1,16 @@
 #include <stdio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/gpio.h"
 #include "freertos/semphr.h"
-#include <esp_system.h>
-#include <bmp280.h>
-#include <max44009.h>
-#include "driver/uart.h"
+#include "esp_system.h"
+#include "bmp280.h"
+#include "max44009.h"
 #include <string.h>
-#include <me3616.h>
+#include "freertos/event_groups.h"
+#include "nvs_flash.h"
+#include "tcp_bsp.h"
+#include "esp_log.h"
 //adc
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
@@ -20,12 +22,6 @@
 #define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
 #define GPIO_UV_EN              0
-// UART
-#define ECHO_TEST_TXD  (GPIO_NUM_17)
-#define ECHO_TEST_RXD  (GPIO_NUM_16)
-#define ECHO_TEST_RTS  (UART_PIN_NO_CHANGE)
-#define ECHO_TEST_CTS  (UART_PIN_NO_CHANGE)
-#define BUF_SIZE (1024)
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
@@ -34,9 +30,6 @@
 #define GP2Y_DELTA_TIME     40
 #define GP2Y_SLEEP_TIME     9680
 
-extern me3616_obj_t obj[ME3616_OBJ_NUM];
-extern me3616_event_t me3616;
-extern bool flag_ok ;
 SemaphoreHandle_t xSemaphore = NULL;
 esp_err_t res;
 
@@ -45,6 +38,9 @@ bmp280_params_t params_b;
 max44009_params_t params_m;
 bmp280_t dev_b;
 max44009_t dev_m;
+ 
+static float data[6];
+static int bigiot_id[6]={8993, 8979, 8989, 8992, 8995, 8996};
 
 // adc
 static esp_adc_cal_characteristics_t *adc_chars;
@@ -59,100 +55,46 @@ void IRAM_ATTR max44009_isr_handler(void* arg) {
     // notify the button task
 	xSemaphoreGiveFromISR(xSemaphore, NULL);
 }
-
-void uart_sendstring(uint8_t UART_NUM, char* str)
-{
-    uart_write_bytes(UART_NUM, (const char *) str, strlen(str));
-}
-char is_message_in_str(const char* data, const char* str)
-{
-    return (strstr(data, str) - data) > 0 ? 1 : 0;
-}
-int count_comma(const char* str, int n);
-void mystrcpy(const char *src, char* dst, int n);
-void float2char(float slope, char* buffer);
-
+static void tcp_connect(void *pvParameters);
+static void bigiot_upload(void *pvParameters);
 void init_gpio();
-void init_uart();
 void init_bme280();
 void init_max44009();
-void init_me3616();
 void bmp280_read();
 void max44009_task();
 void gp2y1014au0f_read();
 void ml8511_read();
-void me3616_getevent(const char * data);
-void me3616_response(const char * data);
-void uart_forward();
-void me3616_upload();
 static void check_efuse();
 static void print_char_val_type(esp_adc_cal_value_t val_type);
 uint32_t analog_read(adc_channel_t channel);
 void init_adc();
-
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
-// void max44009_read(void *pvParameters);
-// void max44009_th_test(void *pvParameters);
 
-// void me3616_test(){
-//     int ret = 0;
-//     me3616_power_on();
-//     printf("Doiot System Start.\r\n");
-//     // wait until internet connect success
-//     while (!me3616.flag_ip){
-//         vTaskDelay(1000 / portTICK_PERIOD_MS); 
-//     }
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 提示符
-//     ret = me3616_send_cmd("AT\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询模块识别信息
-//     ret = me3616_send_cmd("ATI\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询IMEI号
-//     ret = me3616_send_cmd("AT+CGSN=1\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询IMSI号
-//     me3616_send_cmd("AT+CIMI\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询信号强度
-//     me3616_send_cmd("AT+CSQ\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询网络附着状态
-//     me3616_send_cmd("AT+CEREG?\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-    
-//     // 创建onenet平台
-//     me3616_send_cmd("AT+MIPLCREATE\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 新增object id:3303(temperature)
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 注册onenet 平台  这一步比较费时间，要多delay
-//     me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n", flag_ok, 300);
-//     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
-//     // vTaskDelay(100 / portTICK_PERIOD_MS);
-// }
-
+void tcp_send_singledata(int id, float datapoint) {
+    char cmd[60];
+    sprintf(cmd, "{\"M\":\"update\",\"ID\":\"10170\",\"V\":{\"%d\":\"%.2f\"}}\n", id, datapoint);
+    tcp_send(cmd);
+}
 
 void app_main()
 {
     // create the binary semaphore
 	xSemaphore = xSemaphoreCreateBinary();
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    wifi_init_sta();
+    //新建一个tcp连接任务
+    // xTaskCreatePinnedToCore(tcp_connect, "tcp_connect", 4096, NULL, 10, NULL, APP_CPU_NUM);
+    xTaskCreate(&tcp_connect, "tcp_connect", 4096, NULL, 5, NULL);
     init_gpio();
     init_adc();
-    init_uart();
-    xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
-    // me3616_test();
+    
     while (i2cdev_init() != ESP_OK)
     {
         printf("Could not init I2Cdev library\n");
@@ -160,13 +102,12 @@ void app_main()
     }
     init_bme280();
     init_max44009();
-    // initiate me3616 after start uart_forward task ()
-    init_me3616();
+
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
+    xTaskCreatePinnedToCore(bigiot_upload, "bigiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, APP_CPU_NUM);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	// attach the interrupt service routine
@@ -258,7 +199,7 @@ void init_gpio()
     
     io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
     io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = ((1ULL << GPIO_PWR_ME3616)|(1ULL << GPIO_RESET_ME3616)|(1ULL << GPIO_UV_EN));
+    io_conf.pin_bit_mask = (1ULL << GPIO_UV_EN);
     io_conf.pull_down_en = 1;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
@@ -282,25 +223,7 @@ void init_gpio()
     gpio_config(&io_conf);
 }
 
-void init_uart()
-{
-    /* Configure parameters of an UART driver,
-     * communication pins and install the driver */
-    uart_config_t uart_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
-    };
-    uart_param_config(UART_NUM_0, &uart_config);
-    // uart_set_pin(UART_NUM_0, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS);
-    uart_driver_install(UART_NUM_0, BUF_SIZE * 2, 0, 0, NULL, 0);
 
-    uart_param_config(UART_NUM_1, &uart_config);
-    uart_set_pin(UART_NUM_1, ECHO_TEST_TXD, ECHO_TEST_RXD, ECHO_TEST_RTS, ECHO_TEST_CTS);
-    uart_driver_install(UART_NUM_1, BUF_SIZE * 2, 0, 0, NULL, 0);
-}
 
 
 void init_bme280()
@@ -347,109 +270,33 @@ void init_max44009()
         printf("Temperature/pressure reading failed\n");
     }
     printf("init Lux: %.3f\n", lux);
-    // init max & min
-    obj[0].max = lux;
-    obj[0].min = lux;
     if (max44009_set_threshold_etc(&dev_m, &params_m, lux, lux_raw) != ESP_OK)
     {
         printf("Threshold setting failed\n");
     }
 }
 
-void init_me3616()
-{   
-    //me3616_event_t* me3616 = get_me3616();
-    // power me3616
-    gpio_set_level(GPIO_PWR_ME3616, 1);
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-    gpio_set_level(GPIO_PWR_ME3616, 0);
-    printf("Doiot System Start.\r\n");
-    // wait until internet connect success
-    while (!me3616.flag_ip){
-        vTaskDelay(1000 / portTICK_PERIOD_MS); 
-        // printf("flag_ip = %d\n", me3616.flag_ip);
-    }
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    
-    // 提示符
-    uart_sendstring(UART_NUM_1, "AT\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询模块识别信息
-    uart_sendstring(UART_NUM_1, "ATI\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询IMEI号
-    uart_sendstring(UART_NUM_1, "AT+CGSN=1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询IMSI号
-    uart_sendstring(UART_NUM_1, "AT+CIMI\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询信号强度
-    uart_sendstring(UART_NUM_1, "AT+CSQ\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 查询网络附着状态
-    uart_sendstring(UART_NUM_1, "AT+CEREG?\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    
-    // 创建onenet平台
-    uart_sendstring(UART_NUM_1, "AT+MIPLCREATE\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 新增object id:3303(temperature)
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3300,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // 注册onenet 平台  这一步比较费时间，要多delay
-    uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
-    while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
-    vTaskDelay(100 / portTICK_PERIOD_MS);
-    // vTaskDelay(60 * 1000 / portTICK_PERIOD_MS);
-}
 void bmp280_read()
 {
     // float pressure=0, temperature=0, humidity=0;
-    float data[3] = {0};
     // int ret = 0;
     while (1)
     {
-        vTaskDelay(20*1000  / portTICK_PERIOD_MS);
+        vTaskDelay(40*1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
             continue;
         }
         // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
-        if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
+        if (bmp280_read_float(&dev_b, &data[1], &data[3], &data[2]) != ESP_OK)
         {
             printf("Temperature/pressure reading failed\n");
             continue;
         }
 
-        printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
+        printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[1], data[2], data[3]);
         // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        if (me3616.discover_count >= ME3616_OBJ_NUM) {
-            /**
-             * obj[1]: temperature;
-             * obj[2]: humidity;
-             * obj[3]: pressure;
-             */
-            for (int i = 0; i < 3; ++i) {
-                // init max & min otherwise min will always be 0;
-                if (obj[i+1].max == 0 && obj[i+1].min == 0) {
-                    obj[i+1].max = data[i];
-                    obj[i+1].min = data[i];
-                }
-                // obj[i+1].value = data[i];
-                update_value(&obj[i+1], data[i]);
-            }
-        }
     }
 }
 
@@ -481,9 +328,10 @@ void max44009_task()
                     continue;
                 }
                 printf("Lux: %.3f\n", lux_f);
+                data[0] = lux_f;
+                tcp_send_singledata(bigiot_id[0], lux_f);
                 // update value in object
                 // obj[0].value = lux_f;
-                update_value(&obj[0], lux_f);
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
                 {
                     printf("Threshold setting failed\n");
@@ -494,284 +342,6 @@ void max44009_task()
 	}
 }
 
-
-
-/**
- * return index next to the nth ',' of str
- */
-int count_comma(const char* str, int n)
-{
-    int count = 0;
-    size_t i;
-    for(i = 0; str[i] != '\0'; i++)
-    {
-        if (str[i] == ',')   ++count;
-        if (count == n) {
-            break;
-        }
-    }
-    if (count == 0) return -1;
-    else ++i;
-
-    return i;
-}
-
-/**
- * copy str start from the first ',' to the next ',' 
- */
-void mystrcpy(const char *src, char* dst, int n)
-{
-    int l = count_comma(src, n);
-    size_t i = 0;
-    // printf("l = %d\n", l);
-	++l;
-    while (src[l] != '\0'){
-        if (src[l] == ',') break;
-        dst[i] = src[l];
-        ++i;
-        ++l;
-    }
-    // printf("i = %u\n", i);
-    dst[i] = '\0';
-}
-
-/**
- * keep 2 mantissa
- */
-void float2char(float slope, char* buffer)  //浮点型数，存储的字符数组，字符数组的长度
-{
-    int temp;
-    int8_t i = 0, j = 0, k = 0;
-    // if (slope < 0) {
-    //     buffer[0] = '-';
-    //     slope = -slope;
-    // }
-    temp = (int)slope;//取整数部分
-    for(i = 0; temp != 0; i++)//计算整数部分的位数
-        temp /= 10;
-    temp =(int)slope;
-    if (i > 0) {
-       i--;
-    }
-    // printf("i = %d", i);
-    for(j = i; j >= 0; j--)//将整数部分转换成字符串型
-    {
-        buffer[j] = temp % 10 + '0';
-        temp /= 10;
-    }
-    buffer[i + 1] = '.';
-
-    slope -=(int)slope;
-	i = i + 2;
-    for(; k < 2; ++k)//将小数部分转换成字符串型
-    {
-        slope *= 10;
-        buffer[i + k] = (int)slope + '0';
-        slope -= (int)slope;
-    }
-    buffer[i + k] = '\0';
-}
-
-void me3616_getevent(const char * data)
-{
-    // char tmp[10];
-    // char tmp2[10];
-    char cmd[80];
-    char objid[10];
-    char msgid[10];
-    char resourceid[10];
-    if (is_message_in_str(data, "OK")) {
-        flag_ok = 1;
-    }
-    
-    if (is_message_in_str(data, "MIPLOBSERVE:")) {
-        //+MIPLOBSERVE: 0, 80856, 1, 3303, 0, -1
-        mystrcpy(data, objid, 3);// get object id from data (3: obj_id, 1: msgid)
-        // printf("obj_id = |%s|", tmp);
-        for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
-            // printf("tmp = |%s|", tmp);
-            // printf("obj_id = |%s|", obj[i].id);
-            if (!strcmp(objid, obj[i].id)&& !obj[i].observe) {
-                // me3616 object operation
-                obj[i].observe = 1;
-                mystrcpy(data, obj[i].msgid_observe, 1);// copy msgid to object
-                // printf("msgid = %s",obj[i].msgid_observe );
-                me3616_onenet_miplobserve_rsp(cmd, obj[i].msgid_observe);
-                uart_sendstring(UART_NUM_1, cmd);
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-                break;
-            }
-        }
-    } else if (is_message_in_str(data, "MIPLDISCOVER:")) {
-        // +MIPLDISCOVER: 0, 15321, 3303
-        // printf("in DISCOVER\n");
-        mystrcpy(data, objid, 2);// get object id from data (2: obj_id, 1: msgid)
-        objid[4] = '\0'; // manually set '\0'
-        mystrcpy(data, msgid, 1);// copy msgid to object
-        // printf("tmp = %s\n",tmp);
-        for(size_t i = 0; i < ME3616_OBJ_NUM; i++) {
-            // printf("in for loop\n");
-            if (!strcmp(objid, obj[i].id)){//&& !obj[i].discover) {
-                // me3616 object operation
-                // printf("in if\n");
-                obj[i].discover = 1;    
-                me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602;5605\"");
-                uart_sendstring(UART_NUM_1, cmd);
-                me3616.discover_count++;
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-                break;
-            }
-        }
-    } else if (is_message_in_str(data, "+MIPLREAD:")) {
-        // 现在我返回的类型似乎都是float 
-        // +MIPLREAD: 0, 65313, 3303, 0, 5700
-        // AT+MIPLREADRSP=0,65313,1,3303,0,5700,4,4,20.123,0,0
-        int id = -1;
-        int ret = 0;
-        int adc_read = 0;
-        float value[6];
-        mystrcpy(data, msgid, 1);
-        mystrcpy(data, objid, 2);// get object id
-        mystrcpy(data, resourceid, 4);
-        resourceid[4] = '\0';
-
-        if (!strcmp(objid, "3301")) id = 0;
-        else if (!strcmp(objid, "3303")) id = 1;
-        else if (!strcmp(objid, "3304")) id = 2;
-        else if (!strcmp(objid, "3323")) id = 3;
-        else if (!strcmp(objid, "3300")) id = 4;
-        else if (!strcmp(objid, "3325")) id = 5;
-
-        if (id == 1 || id == 2 || id == 3) {    //bme280
-            bmp280_force_measurement(&dev_b);
-            bmp280_read_float(&dev_b, &value[1], &value[3], &value[2]);
-            printf("READRSP: temp: %.2f, humi: %.2f, pres:%.2f\n", value[1], value[2], value[3]);
-            
-        } else if (id == 0) {   //max44009
-            // for reason that i use the intrupt way, it need to change mode to do this
-            // so now just do nothing;
-            value[0] = obj[0].value;//nothing
-        } else if (id == 4) {   //ml8511
-            gpio_set_level(GPIO_UV_EN, 1);
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-            adc_read = analog_read(channel2);
-            vTaskDelay(10 / portTICK_PERIOD_MS);
-            gpio_set_level(GPIO_UV_EN, 0);
-
-            if (adc_read <= 990) adc_read = 990;
-            value[4] = mapfloat((float)adc_read / 1000, 0.99, 2.9, 0.0, 15.0);
-            printf("READRSP：uv intensity: %.2f mw/cm^2\n", value[4]);
-        } else if (id == 5) {   //gp2y
-            gpio_set_level(GPIO_LED_CONTROL, 0);
-            ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
-            adc_read = analog_read(channel1);
-            ets_delay_us(GP2Y_DELTA_TIME);
-            gpio_set_level(GPIO_LED_CONTROL, 1);
-            
-            value[5] = 0.17 * adc_read / 1000 - 0.1;
-            if (value[5] < 0) value[5] = 0;
-            // update value in object
-            printf("READRSP：dust density: %.2f mg/m3\n", value[5]);
-        }
-        // update value and max & min
-        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
-            // obj[i].value = value[i];
-            ret = update_value(&obj[i], value[i]);
-        }
-        // make read response first
-        me3616_onenet_miplread_rsp_float(cmd, msgid, objid, resourceid, obj[id].value, 0);
-        uart_sendstring(UART_NUM_1, cmd);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-        // then send notify of max & min
-        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
-            if (ret == 1) { // max
-                me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                obj[i].id, 5602, value[i], 0);
-                uart_sendstring(UART_NUM_1, cmd);
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-            } else if (ret == 2) { // min
-                me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                obj[i].id, 5601, value[i], 0);
-                uart_sendstring(UART_NUM_1, cmd);
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-            }
-        }
-    } else if (is_message_in_str(data, "+MIPLEXECUTE:")) {
-        // +MIPLEXECUTE:0,22308,3303,0,5605,5, "reset"
-        // AT+MIPLEXECUTERSP=0,22308,2
-        int id = -1;
-        mystrcpy(data, msgid, 1);
-        mystrcpy(data, objid, 2);// get object id
-        mystrcpy(data, resourceid, 4);
-
-        if (!strcmp(objid, "3301")) id = 0;
-        else if (!strcmp(objid, "3303")) id = 1;
-        else if (!strcmp(objid, "3304")) id = 2;
-        else if (!strcmp(objid, "3323")) id = 3;
-        else if (!strcmp(objid, "3300")) id = 4;
-        else if (!strcmp(objid, "3325")) id = 5;
-
-        if(!strcmp(resourceid, "5605")) {
-            printf("clear max&min in id:%s\n", objid);
-            obj[id].max = obj[id].value;
-            obj[id].max = obj[id].value;
-            me3616_onenet_miplexecute_rsp(cmd, msgid, 2);
-            uart_sendstring(UART_NUM_1, cmd);
-            vTaskDelay(100 / portTICK_PERIOD_MS);
-        }
-    } else if (is_message_in_str(data, "+MIPLEVENT: 0, 6")) {
-        // me3616.event = ME3616_REG_SUCCESS;
-        me3616.flag_miplopen = 1;
-        return;
-    } else if (is_message_in_str(data, "+IP:")) {
-        // me3616.event = ME3616_IP_CONNECTED;
-        me3616.flag_ip = 1;
-        return;
-        // printf("event: get_ip\n");
-    } else {
-        // me3616.event = ME3616_NORMAL;    // set to ME3616_NORMAL
-        return;
-    }
-    return;   
-}
-
-/**
- * uart0:   pc  -- esp32
- * uart1: esp32 -- me3616
- */
-void uart_forward()
-{
-    // Configure a temporary buffer for the incoming data
-    uint8_t *data0 = (uint8_t *) malloc(BUF_SIZE);
-    uint8_t *data1 = (uint8_t *) malloc(BUF_SIZE);
-    const char *u_esp32 = {"\nesp32: "};
-    // const char *u_me3616 = {"me3616: "};
-    printf("init\n");
-    while (1) {
-        vTaskDelay(200 / portTICK_PERIOD_MS);
-        // Read data from the UART0
-        int len0 = uart_read_bytes(UART_NUM_0, data0, BUF_SIZE, 20 / portTICK_RATE_MS);
-        int len1 = uart_read_bytes(UART_NUM_1, data1, BUF_SIZE, 20 / portTICK_RATE_MS);
-
-        if (len0 > 0) {//receve from pc
-            uart_write_bytes(UART_NUM_0, u_esp32, 8);
-            uart_write_bytes(UART_NUM_0, (const char *) data0, len0);    //display back
-            uart_write_bytes(UART_NUM_1, (const char *) data0, len0);    //send to me3616
-        }
-        if (len1 > 0) {//receive from me3616
-            // printf("uart1[R]: %d\n", len1);
-            // deal with response from me3616
-            // printf("len1 = %d\n",len1);
-            uart_write_bytes(UART_NUM_0, (const char *) data1, len1);
-            // printf("me3616_getevent\n");
-            // once receive data from me3616, process the data;
-            me3616_getevent((const char *) data1);
-            // printf("me3616_response\n");
-            // me3616_response((const char *) data1);
-            // printf("len1 end\n");
-        }
-    }
-}
 void gp2y1014au0f_read()
 {
     int voltage;
@@ -803,12 +373,8 @@ void gp2y1014au0f_read()
         // update value in object
         // obj[5].value = dustDensity;
         // init max & min otherwise min will always be 0;
-        if (obj[5].max == 0 && obj[5].min == 0) {
-            obj[5].max = dustDensity;
-            obj[5].min = dustDensity;
-        }
-        update_value(&obj[5], dustDensity);
-        printf("Dust Density: %.2f mg/m3\n", dustDensity);
+        data[5] = dustDensity;
+        printf("Dust Density: %.2f mg/m^3\n", dustDensity);
     }
 }
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
@@ -837,65 +403,137 @@ void ml8511_read()
         outputVoltage =  (float)uvLevel / 1000;
         // printf("outputVoltage = %.2f\n", outputVoltage);
         uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
-        // update value in object
-        // obj[4].value = uvIntensity;
-        if (obj[4].max == 0 && obj[4].min == 0) {
-            obj[4].max = uvIntensity;
-            obj[4].min = uvIntensity;
-        }
-        update_value(&obj[4], uvIntensity);
+        
+        data[4] = uvIntensity;
         printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
     }
 }
 
-void me3616_upload()
+static void tcp_connect(void *pvParameters)
 {
-    char cmd[50];
-    char buf[10];
-    int max_count = 0;
-    // float num_test = 13.33;
-    //me3616_event_t* me3616 = get_me3616();
-    printf("nbiot_upload task start!\n");
-    while(1){
-        // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        max_count++;
-        if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
-            me3616.upload_en = 1;
-            printf("init success & upload enable\n");
+    while (1)
+    {
+        g_rxtx_need_restart = false;
+        //等待WIFI连接信号量，死等
+        xEventGroupWaitBits(tcp_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
+        ESP_LOGI(TAG, "start tcp connected");
+
+        TaskHandle_t tx_rx_task = NULL;
+#if TCP_SERVER_CLIENT_OPTION
+        //延时3S准备建立server
+        vTaskDelay(3000 / portTICK_RATE_MS);
+        ESP_LOGI(TAG, "create tcp server");
+        //建立server
+        int socket_ret = create_tcp_server(true);
+#else
+        //延时3S准备建立clien
+        vTaskDelay(3000 / portTICK_RATE_MS);
+        ESP_LOGI(TAG, "create tcp Client");
+        //建立client
+        int socket_ret = create_tcp_client();
+#endif
+        if (socket_ret == ESP_FAIL)
+        {
+            //建立失败
+            ESP_LOGI(TAG, "create tcp socket error,stop...");
+            continue;
+        }
+        else
+        {
+            //建立成功
+            ESP_LOGI(TAG, "create tcp socket succeed...");            
+            //建立tcp接收数据任务
+            if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
+            {
+                //建立失败
+                ESP_LOGI(TAG, "Recv task create fail!");
+            }
+            else
+            {
+                //建立成功
+                ESP_LOGI(TAG, "Recv task create succeed!");
+            }
 
         }
-        if (me3616.flag_miplopen && me3616.upload_en) {
-            for(size_t i = 0; i < ME3616_OBJ_NUM; i++)
+
+
+        while (1)
+        {
+
+            vTaskDelay(3000 / portTICK_RATE_MS);
+
+#if TCP_SERVER_CLIENT_OPTION
+            //重新建立server，流程和上面一样
+            if (g_rxtx_need_restart)
             {
-                // num_test += 1;
-                // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
-                float2char(obj[i].value, buf);
-                me3616_onenet_miplnotify(cmd, obj[i].msgid_observe, obj[i].id,
-                 5700, 4, buf, 0);
-                uart_sendstring(UART_NUM_1, cmd);
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-            }
-            if (max_count == 10) {
-                max_count = 0; // reset counter
-                for (int i = 0; i < ME3616_OBJ_NUM; ++i) { 
-                    if (obj[i].max_flag) { // max
-                        obj[i].max_flag = 0;
-                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                        obj[i].id, 5602, obj[i].max, 0);
-                        uart_sendstring(UART_NUM_1, cmd);
-                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                ESP_LOGI(TAG, "tcp server error,some client leave,restart...");
+                //建立server
+                if (ESP_FAIL != create_tcp_server(false))
+                {
+                    if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
+                    {
+                        ESP_LOGE(TAG, "tcp server Recv task create fail!");
                     }
-                    if (obj[i].min_flag) { // min
-                        obj[i].min_flag = 0;
-                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                        obj[i].id, 5601, obj[i].min, 0);
-                        uart_sendstring(UART_NUM_1, cmd);
-                        vTaskDelay(100 / portTICK_PERIOD_MS);
+                    else
+                    {
+                        ESP_LOGI(TAG, "tcp server Recv task create succeed!");
+                        //重新建立完成，清除标记
+                        g_rxtx_need_restart = false;
                     }
                 }
             }
-        }
+#else
+            //重新建立client，流程和上面一样
+            if (g_rxtx_need_restart)
+            {
+                vTaskDelay(3000 / portTICK_RATE_MS);
+                ESP_LOGI(TAG, "reStart create tcp client...");
+                //建立client
+                int socket_ret = create_tcp_client();
 
+                if (socket_ret == ESP_FAIL)
+                {
+                    ESP_LOGE(TAG, "reStart create tcp socket error,stop...");
+                    continue;
+                }
+                else
+                {
+                    ESP_LOGI(TAG, "reStart create tcp socket succeed...");
+                    //重新建立完成，清除标记
+                    g_rxtx_need_restart = false;
+                    //建立tcp接收数据任务
+                    if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
+                    {
+                        ESP_LOGE(TAG, "reStart Recv task create fail!");
+                    }
+                    else
+                    {
+                        ESP_LOGI(TAG, "reStart Recv task create succeed!");
+                    }
+                }
+                
+                
+            }
+#endif
+        }
+    }
+
+    vTaskDelete(NULL);
+}
+
+static void bigiot_upload(void *pvParameters){
+    vTaskDelay(20000 / portTICK_RATE_MS);
+    char databuff[1024];    //缓存
+    strcpy(databuff, "{\"M\":\"checkin\",\"ID\":\"10170\",\"K\":\"74a83f6c6\"}\n");
+    tcp_send(databuff);
+    vTaskDelay(3000 / portTICK_RATE_MS);
+    while (1)
+    {
+        vTaskDelay(40 * 1000 / portTICK_RATE_MS);
+        sprintf(databuff, "{\"M\":\"update\",\"ID\":\"10170\",\"V\":{\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\"}}\n",
+                        bigiot_id[1], data[1], bigiot_id[2], data[2],
+                        bigiot_id[3], data[3], bigiot_id[4], data[4],
+                        bigiot_id[5], data[5]); 
+        tcp_send(databuff);
     }
 }
