@@ -1,20 +1,41 @@
 #include <stdio.h>
+#include <string.h>
+#include <stdint.h>
+#include <stddef.h>
+
+#include "soc/rtc_cntl_reg.h"
+
+#include "esp_wifi.h"
+#include "esp_system.h"
+#include "nvs_flash.h"
+#include "esp_event_loop.h"
+#include "esp_log.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/gpio.h"
 #include "freertos/semphr.h"
-#include "esp_system.h"
+#include "freertos/queue.h"
+#include "freertos/event_groups.h"
+
+#include "lwip/sockets.h"
+#include "lwip/dns.h"
+#include "lwip/netdb.h"
+
 #include "bmp280.h"
 #include "max44009.h"
-#include <string.h>
-#include "freertos/event_groups.h"
-#include "nvs_flash.h"
-#include "tcp_bsp.h"
-#include "esp_log.h"
+
+#include "driver/gpio.h"
 //adc
 #include "driver/adc.h"
 #include "esp_adc_cal.h"
 #include "rom/ets_sys.h"
+
+#include "config.h"
+#include "debug.h"
+
+#include "mqtt.h"
+#include "os.h"
+#include "onenet.h"
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
@@ -30,6 +51,9 @@
 #define GP2Y_DELTA_TIME     40
 #define GP2Y_SLEEP_TIME     9680
 
+static bool onenet_initialised = false;
+static TaskHandle_t xOneNetTask = NULL;
+
 SemaphoreHandle_t xSemaphore = NULL;
 esp_err_t res;
 
@@ -38,9 +62,11 @@ bmp280_params_t params_b;
 max44009_params_t params_m;
 bmp280_t dev_b;
 max44009_t dev_m;
- 
+
+const char* data_stream[6] = {"illuminance", "temperature", "humidity", "pressure", 
+                         "ultraviolet", "dustDensity"};
 static float data[6];
-static int bigiot_id[6]={8993, 8979, 8989, 8992, 8995, 8996};
+
 
 // adc
 static esp_adc_cal_characteristics_t *adc_chars;
@@ -55,8 +81,11 @@ void IRAM_ATTR max44009_isr_handler(void* arg) {
     // notify the button task
 	xSemaphoreGiveFromISR(xSemaphore, NULL);
 }
-static void tcp_connect(void *pvParameters);
-static void bigiot_upload(void *pvParameters);
+void onenet_task(void *param);
+void data_cb(void *self, void *params);
+static esp_err_t wifi_event_handler(void *ctx, system_event_t *event);
+void wifi_conn_init(void);
+
 void init_gpio();
 void init_bme280();
 void init_max44009();
@@ -70,11 +99,73 @@ uint32_t analog_read(adc_channel_t channel);
 void init_adc();
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
 
-void tcp_send_singledata(int id, float datapoint) {
-    char cmd[60];
-    sprintf(cmd, "{\"M\":\"update\",\"ID\":\"10170\",\"V\":{\"%d\":\"%.2f\"}}\n", id, datapoint);
-    tcp_send(cmd);
+
+void onenet_start(mqtt_client *client)
+{
+    if(!onenet_initialised) {
+        xTaskCreate(&onenet_task, "onenet_task", 2048, client, CONFIG_MQTT_PRIORITY + 1, &xOneNetTask);
+        onenet_initialised = true;
+    }
 }
+
+void onenet_stop(mqtt_client *client)
+{
+    if(onenet_initialised) {
+        if(xOneNetTask) {
+            vTaskDelete(xOneNetTask);
+        }
+        onenet_initialised = false;
+    }
+}
+
+void connected_cb(void *self, void *params)
+{
+    mqtt_client *client = (mqtt_client *)self;
+    //mqtt_subscribe(client, "/test", 0);
+    //mqtt_publish(client, "/test", "howdy!", 6, 0, 0);
+    onenet_start(client);
+}
+void disconnected_cb(void *self, void *params)
+{
+     mqtt_client *client = (mqtt_client *)self;
+     onenet_stop(client);
+}
+void reconnect_cb(void *self, void *params)
+{
+    mqtt_client *client = (mqtt_client *)self;
+    onenet_start(client);
+}
+void subscribe_cb(void *self, void *params)
+{
+    INFO("[APP] Subscribe ok, test publish msg\n");
+    mqtt_client *client = (mqtt_client *)self;
+    //mqtt_publish(client, "/test", "abcde", 5, 0, 0);
+}
+
+void publish_cb(void *self, void *params)
+{
+
+}
+
+mqtt_settings settings = {
+    .host = ONENET_HOST,
+    .port = ONENET_PORT,
+    .client_id = ONENET_DEVICE_ID,
+    .username = ONENET_PROJECT_ID,
+    .password = ONENET_AUTH_INFO,
+    .clean_session = 0,
+    .keepalive = 120,
+    .lwt_topic = "/lwt",
+    .lwt_msg = "offline",
+    .lwt_qos = 0,
+    .lwt_retain = 0,
+    .connected_cb = connected_cb,
+    .disconnected_cb = disconnected_cb,
+    .reconnect_cb = reconnect_cb,
+    .subscribe_cb = subscribe_cb,
+    .publish_cb = publish_cb,
+    .data_cb = data_cb
+};
 
 void app_main()
 {
@@ -88,10 +179,7 @@ void app_main()
     }
     ESP_ERROR_CHECK(ret);
 
-    wifi_init_sta();
-    //新建一个tcp连接任务
-    // xTaskCreatePinnedToCore(tcp_connect, "tcp_connect", 4096, NULL, 10, NULL, APP_CPU_NUM);
-    xTaskCreate(&tcp_connect, "tcp_connect", 4096, NULL, 5, NULL);
+    wifi_conn_init();
     init_gpio();
     init_adc();
     
@@ -107,7 +195,6 @@ void app_main()
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(bigiot_upload, "bigiot_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, APP_CPU_NUM);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
 	// attach the interrupt service routine
@@ -329,7 +416,15 @@ void max44009_task()
                 }
                 printf("Lux: %.3f\n", lux_f);
                 data[0] = lux_f;
-                tcp_send_singledata(bigiot_id[0], lux_f);
+
+                // char buf[128];
+                // sprintf(&buf[3], "{\"%s\":%.2f}", data_stream[0], data[0]);
+                // uint16_t len = strlen(&buf[3]);
+                // buf[0] = data_type_simple_json_without_time;
+                // buf[1] = len >> 8;
+                // buf[2] = len & 0xFF;
+                // mqtt_publish(client, "$dp", buf, len + 3, 0, 0);
+
                 // update value in object
                 // obj[0].value = lux_f;
                 if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
@@ -409,131 +504,105 @@ void ml8511_read()
     }
 }
 
-static void tcp_connect(void *pvParameters)
+void onenet_task(void *param)
 {
-    while (1)
-    {
-        g_rxtx_need_restart = false;
-        //等待WIFI连接信号量，死等
-        xEventGroupWaitBits(tcp_event_group, WIFI_CONNECTED_BIT, false, true, portMAX_DELAY);
-        ESP_LOGI(TAG, "start tcp connected");
+    mqtt_client* client = (mqtt_client *)param;
+    char buf[128];
+    memset(buf, 0, sizeof(buf));
 
-        TaskHandle_t tx_rx_task = NULL;
-#if TCP_SERVER_CLIENT_OPTION
-        //延时3S准备建立server
-        vTaskDelay(3000 / portTICK_RATE_MS);
-        ESP_LOGI(TAG, "create tcp server");
-        //建立server
-        int socket_ret = create_tcp_server(true);
-#else
-        //延时3S准备建立clien
-        vTaskDelay(3000 / portTICK_RATE_MS);
-        ESP_LOGI(TAG, "create tcp Client");
-        //建立client
-        int socket_ret = create_tcp_client();
-#endif
-        if (socket_ret == ESP_FAIL)
-        {
-            //建立失败
-            ESP_LOGI(TAG, "create tcp socket error,stop...");
-            continue;
+   while(1) {
+       vTaskDelay((unsigned long long)ONENET_PUB_INTERVAL* 1000 / portTICK_RATE_MS);
+        for (int i = 0; i < 6; ++i) {
+            sprintf(&buf[3], "{\"%s\":%.2f}", data_stream[i], data[i]);
+            uint16_t len = strlen(&buf[3]);
+            buf[0] = data_type_simple_json_without_time;
+            buf[1] = len >> 8;
+            buf[2] = len & 0xFF;
+            mqtt_publish(client, "$dp", buf, len + 3, 0, 0);
+
+            for (int k = 0 ; k < len + 3; k++){
+                printf("0x%02x ", buf[k]);
+            }
+            printf(", len:%d\n", len+3);
         }
-        else
-        {
-            //建立成功
-            ESP_LOGI(TAG, "create tcp socket succeed...");            
-            //建立tcp接收数据任务
-            if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
-            {
-                //建立失败
-                ESP_LOGI(TAG, "Recv task create fail!");
-            }
-            else
-            {
-                //建立成功
-                ESP_LOGI(TAG, "Recv task create succeed!");
-            }
-
-        }
-
-
-        while (1)
-        {
-
-            vTaskDelay(3000 / portTICK_RATE_MS);
-
-#if TCP_SERVER_CLIENT_OPTION
-            //重新建立server，流程和上面一样
-            if (g_rxtx_need_restart)
-            {
-                ESP_LOGI(TAG, "tcp server error,some client leave,restart...");
-                //建立server
-                if (ESP_FAIL != create_tcp_server(false))
-                {
-                    if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
-                    {
-                        ESP_LOGE(TAG, "tcp server Recv task create fail!");
-                    }
-                    else
-                    {
-                        ESP_LOGI(TAG, "tcp server Recv task create succeed!");
-                        //重新建立完成，清除标记
-                        g_rxtx_need_restart = false;
-                    }
-                }
-            }
-#else
-            //重新建立client，流程和上面一样
-            if (g_rxtx_need_restart)
-            {
-                vTaskDelay(3000 / portTICK_RATE_MS);
-                ESP_LOGI(TAG, "reStart create tcp client...");
-                //建立client
-                int socket_ret = create_tcp_client();
-
-                if (socket_ret == ESP_FAIL)
-                {
-                    ESP_LOGE(TAG, "reStart create tcp socket error,stop...");
-                    continue;
-                }
-                else
-                {
-                    ESP_LOGI(TAG, "reStart create tcp socket succeed...");
-                    //重新建立完成，清除标记
-                    g_rxtx_need_restart = false;
-                    //建立tcp接收数据任务
-                    if (pdPASS != xTaskCreate(&recv_data, "recv_data", 4096, NULL, 4, &tx_rx_task))
-                    {
-                        ESP_LOGE(TAG, "reStart Recv task create fail!");
-                    }
-                    else
-                    {
-                        ESP_LOGI(TAG, "reStart Recv task create succeed!");
-                    }
-                }
-                
-                
-            }
-#endif
-        }
-    }
-
-    vTaskDelete(NULL);
+   }    
 }
 
-static void bigiot_upload(void *pvParameters){
-    vTaskDelay(20000 / portTICK_RATE_MS);
-    char databuff[1024];    //缓存
-    strcpy(databuff, "{\"M\":\"checkin\",\"ID\":\"10170\",\"K\":\"74a83f6c6\"}\n");
-    tcp_send(databuff);
-    vTaskDelay(3000 / portTICK_RATE_MS);
-    while (1)
-    {
-        vTaskDelay(40 * 1000 / portTICK_RATE_MS);
-        sprintf(databuff, "{\"M\":\"update\",\"ID\":\"10170\",\"V\":{\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\",\"%d\":\"%.2f\"}}\n",
-                        bigiot_id[1], data[1], bigiot_id[2], data[2],
-                        bigiot_id[3], data[3], bigiot_id[4], data[4],
-                        bigiot_id[5], data[5]); 
-        tcp_send(databuff);
+void data_cb(void *self, void *params)
+{
+    (void)self;
+    mqtt_event_data_t *event_data = (mqtt_event_data_t *)params;
+
+    if (event_data->data_offset == 0) {
+
+        char *topic = malloc(event_data->topic_length + 1);
+        memcpy(topic, event_data->topic, event_data->topic_length);
+        topic[event_data->topic_length] = 0;
+        INFO("[APP] Publish topic: %s\n", topic);
+        free(topic);
     }
+
+    // char *data = malloc(event_data->data_length + 1);
+    // memcpy(data, event_data->data, event_data->data_length);
+    // data[event_data->data_length] = 0;
+    INFO("[APP] Publish data[%d/%d bytes]\n",
+         event_data->data_length + event_data->data_offset,
+         event_data->data_total_length);
+         // data);
+
+    // free(data);
+
+}
+
+static esp_err_t wifi_event_handler(void *ctx, system_event_t *event)
+{
+
+    switch(event->event_id) {
+    case SYSTEM_EVENT_STA_START:
+        ESP_ERROR_CHECK(esp_wifi_connect());
+        break;
+
+    case SYSTEM_EVENT_STA_GOT_IP:
+
+        mqtt_start(&settings);
+        // Notice that, all callback will called in mqtt_task
+        // All function publish, subscribe
+        break;
+    case SYSTEM_EVENT_STA_DISCONNECTED:
+        /* This is a workaround as ESP32 WiFi libs don't currently
+           auto-reassociate. */
+        
+        mqtt_stop();
+        ESP_ERROR_CHECK(esp_wifi_connect());
+        break;
+    default:
+        break;
+    }
+    return ESP_OK;
+
+
+}
+
+void wifi_conn_init(void)
+{
+    INFO("[APP] Start, connect to Wifi network: %s ..\n", WIFI_SSID);
+
+    tcpip_adapter_init();
+
+    ESP_ERROR_CHECK( esp_event_loop_init(wifi_event_handler, NULL) );
+
+    wifi_init_config_t icfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK( esp_wifi_init(&icfg) );
+    ESP_ERROR_CHECK( esp_wifi_set_storage(WIFI_STORAGE_RAM) );
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASS
+        },
+    };
+
+    ESP_ERROR_CHECK( esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK( esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK( esp_wifi_start());
 }
