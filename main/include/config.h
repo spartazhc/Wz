@@ -4,8 +4,8 @@
 //#define CPU_FREQ_160MHZ
 
 /* Here needs to be changed according to your envirnoment. */
-#define WIFI_SSID           "115_X11"
-#define WIFI_PASS           "19980527"
+#define WIFI_SSID           "MIspartazhc"//"115_X11"
+#define WIFI_PASS           "123123123"//"19980527"
 
 #define ONENET_HOST         "183.230.40.39"
 #define ONENET_PORT         (6002)

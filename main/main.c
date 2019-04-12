@@ -169,8 +169,6 @@ mqtt_settings settings = {
 
 void app_main()
 {
-    // create the binary semaphore
-	xSemaphore = xSemaphoreCreateBinary();
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
     {
@@ -195,10 +193,6 @@ void app_main()
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
-    // install ISR service with default configuration
-	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-	// attach the interrupt service routine
-	gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
 }
 
 
@@ -329,14 +323,20 @@ void init_bme280()
         printf("Could not init BMP280, err: %d\n", res);
         vTaskDelay(250 / portTICK_PERIOD_MS);
     }
-
+    bmp280_force_measurement(&dev_b);
+    bmp280_read_float(&dev_b, &data[1], &data[3], &data[2]);
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[1], data[2], data[3]);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    bmp280_force_measurement(&dev_b);
+    bmp280_read_float(&dev_b, &data[1], &data[3], &data[2]);
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[1], data[2], data[3]);
     // bool bme280p = dev.id == BME280_CHIP_ID;
     // printf("BMP280: found %s\n", bme280p ? "BME280" : "BMP280");
 }
 
 void init_max44009()
 {
-    max44009_init_default_params(&params_m);   
+    max44009_init_auto_params(&params_m);   
     // dev_m.i2c_dev = dev_b.i2c_dev;
     while (max44009_init_desc(&dev_m, MAX44009_I2C_ADDRESS_0, 0, SDA_GPIO, SCL_GPIO) != ESP_OK)
     {
@@ -357,10 +357,6 @@ void init_max44009()
         printf("Temperature/pressure reading failed\n");
     }
     printf("init Lux: %.3f\n", lux);
-    if (max44009_set_threshold_etc(&dev_m, &params_m, lux, lux_raw) != ESP_OK)
-    {
-        printf("Threshold setting failed\n");
-    }
 }
 
 void bmp280_read()
@@ -369,7 +365,7 @@ void bmp280_read()
     // int ret = 0;
     while (1)
     {
-        vTaskDelay(40*1000  / portTICK_PERIOD_MS);
+        vTaskDelay(59 * 1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
@@ -390,51 +386,19 @@ void bmp280_read()
 // task  will react to button clicks
 void max44009_task() 
 {
-	uint8_t intr_status;
     float lux_f = 0;
     uint8_t lux_raw;
 	// infinite loop
-	for(;;) {
-		// wait for the notification from the ISR
-		if(xSemaphoreTake(xSemaphore,portMAX_DELAY) == pdTRUE) {
-            // read the ints bit to confirm
-            // printf("xSemaphore: %d\n", (int)xSemaphore);
-            // printf("read intr_status\n");
-			i2c_dev_read_reg(&dev_m.i2c_dev, 0x00, &intr_status, 1);
-            printf("intr_status: %x\n", intr_status);
-            if (intr_status == 1) {
-                /**max44009 caused the interrupt
-                 * 1. read max44009 amibient lux
-                 * 2. write upper/lower lux threshold and 
-                 *      threshold  timer registers
-                 * 3. wait until next hardware interrupt
-                 */
-                if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
-                {
-                    printf("Temperature/pressure reading failed\n");
-                    continue;
-                }
-                printf("Lux: %.3f\n", lux_f);
-                data[0] = lux_f;
-
-                // char buf[128];
-                // sprintf(&buf[3], "{\"%s\":%.2f}", data_stream[0], data[0]);
-                // uint16_t len = strlen(&buf[3]);
-                // buf[0] = data_type_simple_json_without_time;
-                // buf[1] = len >> 8;
-                // buf[2] = len & 0xFF;
-                // mqtt_publish(client, "$dp", buf, len + 3, 0, 0);
-
-                // update value in object
-                // obj[0].value = lux_f;
-                if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
-                {
-                    printf("Threshold setting failed\n");
-                    continue;
-                }
-            }
-		}
-	}
+    while (1) {
+        vTaskDelay(59 * 1000 / portTICK_PERIOD_MS);
+        if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
+        {
+            printf("Temperature/pressure reading failed\n");
+            continue;
+        }
+        printf("Lux: %.3f\n", lux_f);
+        data[0] = lux_f;
+    }
 }
 
 void gp2y1014au0f_read()
@@ -444,7 +408,7 @@ void gp2y1014au0f_read()
 
     while(1)
     {
-        vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
+        vTaskDelay(59 * 1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_LED_CONTROL, 0);
         // printf("GPIO_25 set low\n");
         ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
@@ -484,7 +448,7 @@ void ml8511_read()
     float outputVoltage, uvIntensity;
     while(1)
     {
-        vTaskDelay(1*60*1000 / portTICK_PERIOD_MS);
+        vTaskDelay(59*1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 1);
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
