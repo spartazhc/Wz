@@ -37,7 +37,7 @@
 #define TYPE_INTEGER    3
 #define TYPE_FLOAT      4
 #define TYPE_BOOL       5
-#define ME3616_OBJ_NUM  6
+#define ME3616_OBJ_NUM  7
 
 
 typedef struct {
@@ -60,6 +60,7 @@ typedef struct {
     // char args[10];  // args for ME3616_EVENT_
     bool flag_ip;
     bool flag_miplopen;
+    bool flag_gps;
     bool upload_en;
     // bool flag_write;
     // int observe_count;
@@ -80,6 +81,8 @@ char* me3616_onenet_miplobserve_rsp(char* dst, const char* msgid);
 char* me3616_onenet_mipldiscover_rsp(char* dst, const char* msgid, const char *valuestring);
 
 char* me3616_onenet_miplnotify_float(char* dst, const char* msgid, const char* objectid,
+    int resourceid, float value, int index);
+char* me3616_onenet_miplnotify_gps(char* dst, const char* msgid, const char* objectid,
     int resourceid, float value, int index);
 char* me3616_onenet_miplnotify(char* dst, const char* msgid, const char* objectid,
     int resourceid, int valuetype, const char *value, int index);

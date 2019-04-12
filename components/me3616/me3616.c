@@ -9,14 +9,15 @@
 // me3616_event_t* me3616 = NULL;
 #define GPIO_PWR_ME3616     4
 #define GPIO_RESET_ME3616   0
-me3616_event_t me3616 = {0, 0, 0, 0};
+me3616_event_t me3616 = {0, 0, 0, 0, 0};
 me3616_obj_t obj[ME3616_OBJ_NUM] = {
     {"3301", 0, 0, 0, 1, 1, 0, 0, ""}, //illuminance    max44009
     {"3303", 0, 0, 0, 1, 1, 0, 0, ""}, //temperature    bme280
     {"3304", 0, 0, 0, 1, 1, 0, 0, ""}, //humidity       bme28
     {"3323", 0, 0, 0, 1, 1, 0, 0, ""}, //pressure       bme28
     {"3300", 0, 0, 0, 1, 1, 0, 0, ""}, //ultraViolet    ml8511
-    {"3325", 0, 0, 0, 1, 1, 0, 0, ""}  //dust           gp2y 
+    {"3325", 0, 0, 0, 1, 1, 0, 0, ""}, //dust           gp2y 
+    {"3336", 0, 0, 0, 1, 1, 0, 0, ""}  //location        
 };
 bool flag_ok = 0;
 
@@ -98,6 +99,12 @@ char* me3616_onenet_miplnotify_float(char* dst, const char* msgid, const char* o
     return dst;
 }
 
+char* me3616_onenet_miplnotify_gps(char* dst, const char* msgid, const char* objectid,
+    int resourceid, float value, int index){
+    sprintf(dst, "AT+MIPLNOTIFY=0,%s,%s,0,%d,%d,%d,%.8f,%d,0\r\n", msgid, objectid,
+        resourceid, 4, 4, value, index);
+    return dst;
+}
 
 char* me3616_onenet_miplupdate(char* dst, int mode){
     sprintf(dst, "AT+MIPLUPDATE=0,3600,%d\r\n", mode);

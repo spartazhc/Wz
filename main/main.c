@@ -70,6 +70,7 @@ char is_message_in_str(const char* data, const char* str)
 }
 int count_comma(const char* str, int n);
 void mystrcpy(const char *src, char* dst, int n);
+void mystrcpy2(const char *src, char* dst, int n);
 void float2char(float slope, char* buffer);
 
 void init_gpio();
@@ -371,41 +372,61 @@ void init_me3616()
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
     
+    uart_sendstring(UART_NUM_1, "AT+ZGMODE=2\r\n");
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+ZGNMEA=2\r\n");  // Only RMC is needed
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+ZGRUN=1\r\n");  // run 1 time (success)
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+
+    int gps_count = 0;
+    while (!me3616.flag_gps){
+        if (gps_count == 18) {
+            uart_sendstring(UART_NUM_1, "AT+ZGRUN=0\r\n"); 
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            break;
+        }
+        vTaskDelay(10 * 1000 / portTICK_PERIOD_MS); 
+        gps_count++;
+    }
+    
     // 提示符
     uart_sendstring(UART_NUM_1, "AT\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 查询模块识别信息
     uart_sendstring(UART_NUM_1, "ATI\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 查询IMEI号
     uart_sendstring(UART_NUM_1, "AT+CGSN=1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 查询IMSI号
     uart_sendstring(UART_NUM_1, "AT+CIMI\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 查询信号强度
     uart_sendstring(UART_NUM_1, "AT+CSQ\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 查询网络附着状态
     uart_sendstring(UART_NUM_1, "AT+CEREG?\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     
     // 创建onenet平台
     uart_sendstring(UART_NUM_1, "AT+MIPLCREATE\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     // 新增object id:3303(temperature)
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3301,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3303,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3304,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3323,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3300,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,1\r\n");
-    vTaskDelay(100 / portTICK_PERIOD_MS);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3336,1,\"1\",2,0\r\n");
+    vTaskDelay(10 / portTICK_PERIOD_MS);
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
@@ -535,6 +556,21 @@ void mystrcpy(const char *src, char* dst, int n)
     dst[i] = '\0';
 }
 
+void mystrcpy2(const char *src, char* dst, int n)
+{
+    int l = count_comma(src, n);
+    size_t i = 0;
+    // printf("l = %d\n", l);
+    while (src[l] != '\0'){
+        if (src[l] == ',') break;
+        dst[i] = src[l];
+        ++i;
+        ++l;
+    }
+    // printf("i = %u\n", i);
+    dst[i] = '\0';
+}
+
 /**
  * keep 2 mantissa
  */
@@ -577,8 +613,8 @@ void me3616_getevent(const char * data)
     // char tmp[10];
     // char tmp2[10];
     char cmd[80];
-    char objid[10];
-    char msgid[10];
+    char objid[12];
+    char msgid[12];
     char resourceid[10];
     if (is_message_in_str(data, "OK")) {
         flag_ok = 1;
@@ -615,7 +651,11 @@ void me3616_getevent(const char * data)
                 // me3616 object operation
                 // printf("in if\n");
                 obj[i].discover = 1;    
-                me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602;5605\"");
+                if (i == 6) {// location is different
+                    me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5514;5515\"");
+                } else {
+                    me3616_onenet_mipldiscover_rsp(cmd, msgid, "\"5700;5601;5602;5605\"");
+                }
                 uart_sendstring(UART_NUM_1, cmd);
                 me3616.discover_count++;
                 vTaskDelay(100 / portTICK_PERIOD_MS);
@@ -641,7 +681,7 @@ void me3616_getevent(const char * data)
         else if (!strcmp(objid, "3323")) id = 3;
         else if (!strcmp(objid, "3300")) id = 4;
         else if (!strcmp(objid, "3325")) id = 5;
-
+        
         if (id == 1 || id == 2 || id == 3) {    //bme280
             bmp280_force_measurement(&dev_b);
             bmp280_read_float(&dev_b, &value[1], &value[3], &value[2]);
@@ -674,7 +714,7 @@ void me3616_getevent(const char * data)
             printf("READRSP：dust density: %.2f mg/m3\n", value[5]);
         }
         // update value and max & min
-        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
+        for (int i = 0; i < ME3616_OBJ_NUM - 1; ++i){
             // obj[i].value = value[i];
             ret = update_value(&obj[i], value[i]);
         }
@@ -683,7 +723,7 @@ void me3616_getevent(const char * data)
         uart_sendstring(UART_NUM_1, cmd);
         vTaskDelay(100 / portTICK_PERIOD_MS);
         // then send notify of max & min
-        for (int i = 0; i < ME3616_OBJ_NUM; ++i){
+        for (int i = 0; i < ME3616_OBJ_NUM - 1; ++i){
             if (ret == 1) { // max
                 me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
                 obj[i].id, 5602, value[i], 0);
@@ -726,6 +766,27 @@ void me3616_getevent(const char * data)
     } else if (is_message_in_str(data, "+IP:")) {
         // me3616.event = ME3616_IP_CONNECTED;
         me3616.flag_ip = 1;
+        return;
+        // printf("event: get_ip\n");
+    } else if (is_message_in_str(data, "GNRMC")) {
+        // here we use objid msgid as 2 temp char[]
+        // $GNRMC,064914.36,V,,,,,,,120419,,,N,V*1D
+        // $GNRMC,064915.36,A,3101.61831,N,12126.26758,E,0.000,,120419,,,A,V*17
+        float lat=0, lon=0;
+        int itmp=0;
+        mystrcpy2(data, objid, 2); // get valid information
+        if (!strcmp(objid, "A")) {
+            mystrcpy(data, objid, 3);
+            mystrcpy(data, msgid, 5);
+            lat = atof(objid);
+            itmp = lat / 100;
+            obj[6].max = itmp + (lat - itmp*100)/60;
+            lon = atof(msgid);
+            itmp = lon / 100;
+            obj[6].min = itmp + (lon - itmp*100)/60;
+            printf("Latitude: %.8f, Longitude: %.8f\n", obj[6].max, obj[6].min);
+            me3616.flag_gps = 1;
+        }
         return;
         // printf("event: get_ip\n");
     } else {
@@ -860,13 +921,22 @@ void me3616_upload()
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
+        if (me3616.flag_gps == 1) {
+            me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
+                        obj[6].id, 5514, obj[6].max, 0);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
+                        obj[6].id, 5515, obj[6].min, 0);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            me3616.flag_gps = 0;
+        }
         if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");
 
         }
         if (me3616.flag_miplopen && me3616.upload_en) {
-            for(size_t i = 0; i < ME3616_OBJ_NUM; i++)
+            for(size_t i = 0; i < ME3616_OBJ_NUM - 1; i++)
             {
                 // num_test += 1;
                 // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
@@ -878,7 +948,7 @@ void me3616_upload()
             }
             if (max_count == 10) {
                 max_count = 0; // reset counter
-                for (int i = 0; i < ME3616_OBJ_NUM; ++i) { 
+                for (int i = 0; i < ME3616_OBJ_NUM - 1; ++i) { 
                     if (obj[i].max_flag) { // max
                         obj[i].max_flag = 0;
                         me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
