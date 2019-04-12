@@ -18,8 +18,8 @@
 #include <malloc.h>
 #include "esp_err.h"
 
-#define GPIO_PWR_ME3616     4
-#define GPIO_RESET_ME3616   0
+#define GPIO_PWR_ME3616     17
+#define GPIO_RESET_ME3616   5
 
 #define ME3616_NORMAL        0
 #define ME3616_OBSERVE       1
