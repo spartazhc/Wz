@@ -36,9 +36,14 @@
 #include "mqtt.h"
 #include "os.h"
 #include "onenet.h"
+
+#include "ssd1306.h"
+#include "fonts.h"
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
+#define I2C_SDA 18
+#define I2C_SCL 19
 #define GPIO_INTR_IO            5  // INTR pin for max44009
 #define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
@@ -93,6 +98,7 @@ void bmp280_read();
 void max44009_task();
 void gp2y1014au0f_read();
 void ml8511_read();
+void display_task();
 static void check_efuse();
 static void print_char_val_type(esp_adc_cal_value_t val_type);
 uint32_t analog_read(adc_channel_t channel);
@@ -169,17 +175,17 @@ mqtt_settings settings = {
 
 void app_main()
 {
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
-    {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
+    // esp_err_t ret = nvs_flash_init();
+    // if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
+    // {
+    //     ESP_ERROR_CHECK(nvs_flash_erase());
+    //     ret = nvs_flash_init();
+    // }
+    // ESP_ERROR_CHECK(ret);
 
-    wifi_conn_init();
-    init_gpio();
-    init_adc();
+    // wifi_conn_init();
+    // init_gpio();
+    // init_adc();
     
     while (i2cdev_init() != ESP_OK)
     {
@@ -189,12 +195,44 @@ void app_main()
     init_bme280();
     init_max44009();
 
+    if (ssd1306_init(0, SCL_GPIO, SDA_GPIO)) {
+        ESP_LOGI("OLED", "oled initialized");
+    }
+    else {
+        ESP_LOGE("OLED", "oled init failed");
+    }
+
+    xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
 }
 
+void display_task() {
+    int i = 0;
+    char num[10];
+    while (1) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // clear LCD, and select font 1
+        ssd1306_clear(0);
+        ssd1306_select_font(0, 1);
+
+        
+        i++;
+        sprintf(num, "%d", i);
+        printf("i = %d, num = %s\n", i, num);
+        // print weather data on LCD
+        ssd1306_draw_string(0, 0, 0, "Shanghai", 1, 0);
+        ssd1306_draw_string(0, 0, 16, "temperature", 1, 0);
+        ssd1306_draw_string(0, 0, 26, num, 1, 0);
+        ssd1306_draw_string(0, 0, 40, "Description:", 1, 0);
+        ssd1306_draw_string(0, 0, 50, "cool", 1, 0);
+        ssd1306_refresh(0, true);
+
+    }   
+
+}
 
 static void check_efuse()
 {
@@ -349,7 +387,6 @@ void init_max44009()
         printf("Could not init MAX44009, err: %d\n", res);
         vTaskDelay(250 / portTICK_PERIOD_MS);
     }
-
     float lux;
     uint8_t lux_raw;
     if (max44009_read_float(&dev_m, &lux, &lux_raw) != ESP_OK)
@@ -365,7 +402,7 @@ void bmp280_read()
     // int ret = 0;
     while (1)
     {
-        vTaskDelay(59 * 1000  / portTICK_PERIOD_MS);
+        vTaskDelay(15 * 1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
@@ -390,7 +427,7 @@ void max44009_task()
     uint8_t lux_raw;
 	// infinite loop
     while (1) {
-        vTaskDelay(59 * 1000 / portTICK_PERIOD_MS);
+        vTaskDelay(15 * 1000 / portTICK_PERIOD_MS);
         if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
         {
             printf("Temperature/pressure reading failed\n");
