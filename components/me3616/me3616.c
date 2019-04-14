@@ -101,8 +101,10 @@ char* me3616_onenet_miplnotify_float(char* dst, const char* msgid, const char* o
 
 char* me3616_onenet_miplnotify_gps(char* dst, const char* msgid, const char* objectid,
     int resourceid, float value, int index){
-    sprintf(dst, "AT+MIPLNOTIFY=0,%s,%s,0,%d,%d,%d,%.8f,%d,0\r\n", msgid, objectid,
-        resourceid, 4, 4, value, index);
+    char str_value[15];
+    sprintf(str_value, "%.8f", value);
+    sprintf(dst, "AT+MIPLNOTIFY=0,%s,%s,0,%d,%d,%d,%s,%d,0\r\n", msgid, objectid,
+        resourceid, 1, strlen(str_value), str_value, index);
     return dst;
 }
 

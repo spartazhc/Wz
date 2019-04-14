@@ -924,9 +924,11 @@ void me3616_upload()
         if (me3616.flag_gps == 1) {
             me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
                         obj[6].id, 5514, obj[6].max, 0);
+            uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
                         obj[6].id, 5515, obj[6].min, 0);
+            uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616.flag_gps = 0;
         }
