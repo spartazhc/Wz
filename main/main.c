@@ -8,7 +8,7 @@
 #include <max44009.h>
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_INTR_IO            5
+#define GPIO_INTR_IO            2
 #define ESP_INTR_FLAG_DEFAULT   0
   
 SemaphoreHandle_t xSemaphore = NULL;
@@ -133,7 +133,7 @@ void bmp280_read(void *pvParamters)
 
     while (1)
     {
-        vTaskDelay(2000  / portTICK_PERIOD_MS);
+        vTaskDelay(60 * 1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
