@@ -34,6 +34,8 @@
 #define GP2Y_DELTA_TIME     40
 #define GP2Y_SLEEP_TIME     9680
 
+// #define ME3616_GPS_MODE
+
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
 extern me3616_event_t me3616;
 extern bool flag_ok ;
@@ -77,7 +79,7 @@ void init_gpio();
 void init_uart();
 void init_bme280();
 void init_max44009();
-void init_me3616();
+void me3616_registered_to_onenet();
 void bmp280_read();
 void max44009_task();
 void gp2y1014au0f_read();
@@ -92,57 +94,6 @@ uint32_t analog_read(adc_channel_t channel);
 void init_adc();
 
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
-// void max44009_read(void *pvParameters);
-// void max44009_th_test(void *pvParameters);
-
-// void me3616_test(){
-//     int ret = 0;
-//     me3616_power_on();
-//     printf("Doiot System Start.\r\n");
-//     // wait until internet connect success
-//     while (!me3616.flag_ip){
-//         vTaskDelay(1000 / portTICK_PERIOD_MS); 
-//     }
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 提示符
-//     ret = me3616_send_cmd("AT\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询模块识别信息
-//     ret = me3616_send_cmd("ATI\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询IMEI号
-//     ret = me3616_send_cmd("AT+CGSN=1\r\n", flag_ok, 300);
-//     printf("**ret = %d\n", ret);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询IMSI号
-//     me3616_send_cmd("AT+CIMI\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询信号强度
-//     me3616_send_cmd("AT+CSQ\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 查询网络附着状态
-//     me3616_send_cmd("AT+CEREG?\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-    
-//     // 创建onenet平台
-//     me3616_send_cmd("AT+MIPLCREATE\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 新增object id:3303(temperature)
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3301,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3303,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3304,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     me3616_send_cmd("AT+MIPLADDOBJ=0,3323,1,\"1\",3,0\r\n", flag_ok, 300);
-//     vTaskDelay(100 / portTICK_PERIOD_MS);
-//     // 注册onenet 平台  这一步比较费时间，要多delay
-//     me3616_send_cmd("AT+MIPLOPEN=0,3600\r\n", flag_ok, 300);
-//     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
-//     // vTaskDelay(100 / portTICK_PERIOD_MS);
-// }
 
 
 void app_main()
@@ -153,7 +104,6 @@ void app_main()
     init_adc();
     init_uart();
     xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
-    // me3616_test();
     while (i2cdev_init() != ESP_OK)
     {
         printf("Could not init I2Cdev library\n");
@@ -162,7 +112,8 @@ void app_main()
     init_bme280();
     init_max44009();
     // initiate me3616 after start uart_forward task ()
-    init_me3616();
+    me3616_power_on();
+    me3616_registered_to_onenet();
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
@@ -357,21 +308,16 @@ void init_max44009()
     }
 }
 
-void init_me3616()
-{   
-    //me3616_event_t* me3616 = get_me3616();
-    // power me3616
-    gpio_set_level(GPIO_PWR_ME3616, 1);
-    vTaskDelay(2000 / portTICK_PERIOD_MS);
-    gpio_set_level(GPIO_PWR_ME3616, 0);
-    printf("Doiot System Start.\r\n");
+void me3616_registered_to_onenet()
+{  
+    printf("Register to onenet...\r\n");
     // wait until internet connect success
     while (!me3616.flag_ip){
         vTaskDelay(1000 / portTICK_PERIOD_MS); 
         // printf("flag_ip = %d\n", me3616.flag_ip);
     }
     vTaskDelay(100 / portTICK_PERIOD_MS);
-    
+#ifdef ME3616_GPS_MODE
     uart_sendstring(UART_NUM_1, "AT+ZGMODE=2\r\n");
     vTaskDelay(100 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+ZGNMEA=2\r\n");  // Only RMC is needed
@@ -389,7 +335,7 @@ void init_me3616()
         vTaskDelay(10 * 1000 / portTICK_PERIOD_MS); 
         gps_count++;
     }
-    
+#endif
     // 提示符
     uart_sendstring(UART_NUM_1, "AT\r\n");
     vTaskDelay(10 / portTICK_PERIOD_MS);
@@ -924,6 +870,7 @@ void me3616_upload()
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
+    #ifdef ME3616_GPS_MODE
         if (me3616.flag_gps == 1) {
             me3616_onenet_miplnotify_gps(cmd, obj[6].msgid_observe,
                         obj[6].id, 5514, obj[6].max, 0);//max place latitude
@@ -935,6 +882,7 @@ void me3616_upload()
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616.flag_gps = 0;
         }
+    #endif
         if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");

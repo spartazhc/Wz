@@ -7,8 +7,8 @@
 
 // const char* obj_list[ME3616_OBJ_NUM] = {"3301", "3303", "3304", "3323"};
 // me3616_event_t* me3616 = NULL;
-#define GPIO_PWR_ME3616     4
-#define GPIO_RESET_ME3616   0
+#define GPIO_PWR_ME3616     17
+#define GPIO_RESET_ME3616   5
 me3616_event_t me3616 = {0, 0, 0, 0, 0};
 me3616_obj_t obj[ME3616_OBJ_NUM] = {
     {"3301", 0, 0, 0, 1, 1, 0, 0, ""}, //illuminance    max44009
@@ -42,6 +42,12 @@ void me3616_power_on(void)
     gpio_set_level(GPIO_PWR_ME3616, 0);      /* set PWR low */
 }
 
+void me3616_wake_up(void)
+{
+    gpio_set_level(GPIO_PWR_ME3616, 1);      /* set PWR high to poweron */
+    vTaskDelay(1000 / portTICK_PERIOD_MS);
+    gpio_set_level(GPIO_PWR_ME3616, 0);      /* set PWR low */
+}
 
 void me3616_hardware_reset(void)
 {
@@ -50,13 +56,6 @@ void me3616_hardware_reset(void)
     gpio_set_level(GPIO_RESET_ME3616, 0);      /* set PWR low */
 }
 
-// ? is there a wakeup pin?
-// void me3616_wake_up(void) 
-// {
-// 	GPIO_SetBits(GPIOC, GPIO_Pin_6);	/* 拉高WAKE_UP引脚，唤醒模组 */
-// 	delay_ms(100);
-// 	GPIO_ResetBits(GPIOC, GPIO_Pin_6);
-// }
 
 int me3616_sleep_config(int mode)
 {
