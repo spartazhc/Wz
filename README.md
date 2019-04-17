@@ -1,6 +1,18 @@
 # Wz
 
-A crowd-source mobile weather station based on esp32 and me3616
+A crowd-source mobile weather station based on esp32 and me3616.
+
+we will produce 2 versions:
+
+- **NBiot + LWM2M version**: powerful
+- **WiFi + MQTT version**: tiny and convenient
+
+| components | NBiot + LWM2M | WiFi + MQTT    |
+| ---------- | ------------- | -------------- |
+| GPS        | me3616-G1A    | no             |
+| oled       | no            | SSD1306 128x32 |
+| battery    | 7.4V 1800mAh  | 3.7v  180mAh   |
+| GP2Y1014AU | yes           | no             |
 
 ## Requirements
 
