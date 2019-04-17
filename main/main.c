@@ -776,14 +776,17 @@ void me3616_getevent(const char * data)
         int itmp=0;
         mystrcpy2(data, objid, 2); // get valid information
         if (!strcmp(objid, "A")) {
-            mystrcpy(data, objid, 3);
-            mystrcpy(data, msgid, 5);
+            mystrcpy2(data, objid, 3);
+            mystrcpy2(data, msgid, 5);
             lat = atof(objid);
             itmp = lat / 100;
+            // printf("itmp=%d\n", itmp);
             obj[6].max = itmp + (lat - itmp*100)/60;
             lon = atof(msgid);
             itmp = lon / 100;
+            // printf("itmp=%d\n", itmp);
             obj[6].min = itmp + (lon - itmp*100)/60;
+            // printf("sLatitude: %s, sLongitude: %s\n", objid, msgid);
             printf("Latitude: %.8f, Longitude: %.8f\n", obj[6].max, obj[6].min);
             me3616.flag_gps = 1;
         }
@@ -922,12 +925,12 @@ void me3616_upload()
         vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
         if (me3616.flag_gps == 1) {
-            me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
-                        obj[6].id, 5514, obj[6].max, 0);
+            me3616_onenet_miplnotify_gps(cmd, obj[6].msgid_observe,
+                        obj[6].id, 5514, obj[6].max, 0);//max place latitude
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            me3616_onenet_miplnotify_float(cmd, obj[6].msgid_observe,
-                        obj[6].id, 5515, obj[6].min, 0);
+            me3616_onenet_miplnotify_gps(cmd, obj[6].msgid_observe,
+                        obj[6].id, 5515, obj[6].min, 0);//min place longitude
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616.flag_gps = 0;
