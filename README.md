@@ -65,3 +65,10 @@ we will produce 2 versions:
 |           | SCL | 19 | I2C |
 | ML8511 | EN | 15 | output |
 |           | ADC | 35 | adc |
+
+## TODO
+
+- 3d-print box & acrylic pannel
+- PCB: final version
+- better Android app
+
