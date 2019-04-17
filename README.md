@@ -71,4 +71,7 @@ we will produce 2 versions:
 - 3d-print box & acrylic pannel
 - PCB: final version
 - better Android app
+- power saving:
+  - nbiot: PSM mode
+  - esp32: lightsleep
 
