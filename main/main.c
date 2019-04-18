@@ -46,8 +46,6 @@
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_INTR_IO            5  // INTR pin for max44009
-#define ESP_INTR_FLAG_DEFAULT   0   
 #define GPIO_UV_EN              0
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
@@ -56,7 +54,6 @@
 static bool onenet_initialised = false;
 static TaskHandle_t xOneNetTask = NULL;
 
-SemaphoreHandle_t xSemaphore = NULL;
 esp_err_t res;
 
 //bmp280 & max44009
@@ -77,11 +74,6 @@ static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
 static const adc_atten_t atten = ADC_ATTEN_DB_11;
 static const adc_unit_t unit = ADC_UNIT_1;
 
-// interrupt service routine, called when the button is pressed
-void IRAM_ATTR max44009_isr_handler(void* arg) {
-    // notify the button task
-	xSemaphoreGiveFromISR(xSemaphore, NULL);
-}
 void onenet_task(void *param);
 void data_cb(void *self, void *params);
 static esp_err_t wifi_event_handler(void *ctx, system_event_t *event);
@@ -310,18 +302,6 @@ void init_gpio()
     io_conf.pin_bit_mask = (1ULL << GPIO_UV_EN);
     io_conf.pull_down_en = 1;
     io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-    //enable interrupt as negedge
-    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    //set as input mode
-    io_conf.mode = GPIO_MODE_INPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    //configure GPIO with the given settings
     gpio_config(&io_conf);
 }
 
