@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -36,25 +37,21 @@
 #include "mqtt.h"
 #include "os.h"
 #include "onenet.h"
-
+// ssd1306
 #include "ssd1306.h"
-#include "fonts.h"
+#include "ssd1306_draw.h"
+#include "ssd1306_font.h"
+#include "ssd1306_default_if.h"
+
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define I2C_SDA 18
-#define I2C_SCL 19
 #define GPIO_INTR_IO            5  // INTR pin for max44009
 #define ESP_INTR_FLAG_DEFAULT   0   
-#define GPIO_LED_CONTROL        25  // LED control pin for gp2y1014au
 #define GPIO_UV_EN              0
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
-// gp2y time define in microsecoend !
-#define GP2Y_SAMPLE_TIME    280
-#define GP2Y_DELTA_TIME     40
-#define GP2Y_SLEEP_TIME     9680
 
 static bool onenet_initialised = false;
 static TaskHandle_t xOneNetTask = NULL;
@@ -75,9 +72,8 @@ static float data[6];
 
 // adc
 static esp_adc_cal_characteristics_t *adc_chars;
-static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
+// static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34 if ADC1, GPIO14 if ADC2
 static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
-// static const adc_channel_t channel3 = ADC_CHANNEL_4;     //GPIO32
 static const adc_atten_t atten = ADC_ATTEN_DB_11;
 static const adc_unit_t unit = ADC_UNIT_1;
 
@@ -96,7 +92,6 @@ void init_bme280();
 void init_max44009();
 void bmp280_read();
 void max44009_task();
-void gp2y1014au0f_read();
 void ml8511_read();
 void display_task();
 static void check_efuse();
@@ -184,8 +179,8 @@ void app_main()
     // ESP_ERROR_CHECK(ret);
 
     // wifi_conn_init();
-    // init_gpio();
-    // init_adc();
+    init_gpio();
+    init_adc();
     
     while (i2cdev_init() != ESP_OK)
     {
@@ -195,44 +190,38 @@ void app_main()
     init_bme280();
     init_max44009();
 
-    if (ssd1306_init(0, SCL_GPIO, SDA_GPIO)) {
-        ESP_LOGI("OLED", "oled initialized");
-    }
-    else {
-        ESP_LOGE("OLED", "oled init failed");
-    }
 
-    xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
+
+    // xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
 }
 
-void display_task() {
-    int i = 0;
-    char num[10];
-    while (1) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
-        // clear LCD, and select font 1
-        ssd1306_clear(0);
-        ssd1306_select_font(0, 1);
+// void display_task() {
+//     int i = 0;
+//     char num[10];
+//     while (1) {
+//         vTaskDelay(1000 / portTICK_PERIOD_MS);
+//         // clear LCD, and select font 1
+//         ssd1306_clear(0);
+//         ssd1306_select_font(0, 1);
 
         
-        i++;
-        sprintf(num, "%d", i);
-        printf("i = %d, num = %s\n", i, num);
-        // print weather data on LCD
-        ssd1306_draw_string(0, 0, 0, "Shanghai", 1, 0);
-        ssd1306_draw_string(0, 0, 16, "temperature", 1, 0);
-        ssd1306_draw_string(0, 0, 26, num, 1, 0);
-        ssd1306_draw_string(0, 0, 40, "Description:", 1, 0);
-        ssd1306_draw_string(0, 0, 50, "cool", 1, 0);
-        ssd1306_refresh(0, true);
+//         i++;
+//         sprintf(num, "%d", i);
+//         printf("i = %d, num = %s\n", i, num);
+//         // print weather data on LCD
+//         ssd1306_draw_string(0, 0, 0, "Shanghai", 1, 0);
+//         ssd1306_draw_string(0, 0, 16, "temperature", 1, 0);
+//         ssd1306_draw_string(0, 0, 26, num, 1, 0);
+//         ssd1306_draw_string(0, 0, 40, "Description:", 1, 0);
+//         ssd1306_draw_string(0, 0, 50, "cool", 1, 0);
+//         ssd1306_refresh(0, true);
 
-    }   
+//     }   
 
-}
+// }
 
 static void check_efuse()
 {
@@ -295,7 +284,7 @@ void init_adc()
     //Configure ADC
     if (unit == ADC_UNIT_1) {
         adc1_config_width(ADC_WIDTH_BIT_12);
-        adc1_config_channel_atten(channel1, atten);
+        // adc1_config_channel_atten(channel1, atten);
         adc1_config_channel_atten(channel2, atten);
     } else {
         // adc2_config_channel_atten((adc2_channel_t)channel, atten);
@@ -321,12 +310,6 @@ void init_gpio()
     io_conf.pin_bit_mask = (1ULL << GPIO_UV_EN);
     io_conf.pull_down_en = 1;
     io_conf.pull_up_en = 0;
-    gpio_config(&io_conf);
-    io_conf.intr_type = GPIO_PIN_INTR_DISABLE;
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    io_conf.pin_bit_mask = ((1ULL << GPIO_LED_CONTROL));
-    io_conf.pull_down_en = 0;
-    io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
     //enable interrupt as negedge
     io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
@@ -438,41 +421,6 @@ void max44009_task()
     }
 }
 
-void gp2y1014au0f_read()
-{
-    int voltage;
-    float dustDensity;
-
-    while(1)
-    {
-        vTaskDelay(59 * 1000 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_LED_CONTROL, 0);
-        // printf("GPIO_25 set low\n");
-        ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
-        
-        // printf("analog_read start\n");
-        voltage = analog_read(channel1);
-        // printf("analog_read end\n");
-
-        ets_delay_us(GP2Y_DELTA_TIME);
-        // printf("delay delta finished\n");
-        
-        gpio_set_level(GPIO_LED_CONTROL, 1);
-        // printf("GPIO_25 set high\n");
-        ets_delay_us(GP2Y_SLEEP_TIME);
-
-        // printf("delay sleep finished\n");
-
-        dustDensity = 0.17 * voltage / 1000 - 0.1;
-
-        if (dustDensity < 0) dustDensity = 0;
-        // update value in object
-        // obj[5].value = dustDensity;
-        // init max & min otherwise min will always be 0;
-        data[5] = dustDensity;
-        printf("Dust Density: %.2f mg/m^3\n", dustDensity);
-    }
-}
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
 {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
