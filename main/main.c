@@ -43,10 +43,16 @@
 #include "ssd1306_font.h"
 #include "ssd1306_default_if.h"
 
+// ssd 1306
+static const int I2CDisplayAddress = 0x3C;
+static const int I2CDisplayWidth = 128;
+static const int I2CDisplayHeight = 32;
+static const int I2CResetPin = -1;
+struct SSD1306_Device I2CDisplay;
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_UV_EN              0
+#define GPIO_UV_EN          0
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
@@ -92,6 +98,11 @@ uint32_t analog_read(adc_channel_t channel);
 void init_adc();
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
 
+bool DefaultBusInit( void ) {
+    assert( SSD1306_I2CMasterInitDefault( ) == true );
+    assert( SSD1306_I2CMasterAttachDisplayDefault( &I2CDisplay, I2CDisplayWidth, I2CDisplayHeight, I2CDisplayAddress, I2CResetPin ) == true );
+    return true;
+}
 
 void onenet_start(mqtt_client *client)
 {
@@ -182,38 +193,34 @@ void app_main()
     init_bme280();
     init_max44009();
 
+    if ( DefaultBusInit( ) == true ) {
+        printf( "I2C Display Bus Init lookin good...\n" );
+        xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
+    } else printf( "Failed to init display ...\n" );
 
-
-    // xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
+    
     xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
 }
 
-// void display_task() {
-//     int i = 0;
-//     char num[10];
-//     while (1) {
-//         vTaskDelay(1000 / portTICK_PERIOD_MS);
-//         // clear LCD, and select font 1
-//         ssd1306_clear(0);
-//         ssd1306_select_font(0, 1);
+void display_task() {
+    
+    while (1) {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        // clear LCD, and select font 1
+        SSD1306_Clear( &I2CDisplay, SSD_COLOR_BLACK );
+        SSD1306_SetFont( &I2CDisplay, &Font_droid_sans_mono_7x13);
 
-        
-//         i++;
-//         sprintf(num, "%d", i);
-//         printf("i = %d, num = %s\n", i, num);
-//         // print weather data on LCD
-//         ssd1306_draw_string(0, 0, 0, "Shanghai", 1, 0);
-//         ssd1306_draw_string(0, 0, 16, "temperature", 1, 0);
-//         ssd1306_draw_string(0, 0, 26, num, 1, 0);
-//         ssd1306_draw_string(0, 0, 40, "Description:", 1, 0);
-//         ssd1306_draw_string(0, 0, 50, "cool", 1, 0);
-//         ssd1306_refresh(0, true);
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, "T:22.22C", SSD_COLOR_WHITE );
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, "UV:0.35", SSD_COLOR_WHITE );
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, "H:80.88\%", SSD_COLOR_WHITE );
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, "dust:0.21", SSD_COLOR_WHITE );
+        SSD1306_Update( &I2CDisplay );
 
-//     }   
+    }   
 
-// }
+}
 
 static void check_efuse()
 {
