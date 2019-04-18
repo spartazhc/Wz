@@ -44,8 +44,8 @@ we will produce 2 versions:
 | --------- | -------- | ------ | ---- |
 | NB-iot    | RST      | 5 |   output|
 |           | PWR | 17 | output |
-|           | RXD | 16 | UART |
-|           | TXD | 4 | UART |
+|           | RXD | 4 | UART |
+|           | TXD | 16 | UART |
 | BME280 | SDA | 18 | I2C |
 |           | SCL | 19 | I2C |
 | MAX44009 | SDA | 18 | I2C |
