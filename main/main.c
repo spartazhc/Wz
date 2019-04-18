@@ -57,6 +57,7 @@ struct SSD1306_Device I2CDisplay;
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
 
+#define DELAY_SECOND    5
 static bool onenet_initialised = false;
 static TaskHandle_t xOneNetTask = NULL;
 
@@ -204,18 +205,25 @@ void app_main()
     xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
 }
 
+// const char* data_stream[6] = {"illuminance", "temperature", "humidity", "pressure", 
+//                          "ultraviolet", "dustDensity"};
+
 void display_task() {
     
     while (1) {
-        vTaskDelay(1000 / portTICK_PERIOD_MS);
+        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
         // clear LCD, and select font 1
         SSD1306_Clear( &I2CDisplay, SSD_COLOR_BLACK );
         SSD1306_SetFont( &I2CDisplay, &Font_droid_sans_mono_7x13);
-
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, "T:22.22C", SSD_COLOR_WHITE );
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, "UV:0.35", SSD_COLOR_WHITE );
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, "H:80.88\%", SSD_COLOR_WHITE );
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, "dust:0.21", SSD_COLOR_WHITE );
+        char str[20];
+        sprintf(str, "T:%.2fC", data[1]);
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, str, SSD_COLOR_WHITE );
+        sprintf(str, "UV:%.2f", data[4]);
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, str, SSD_COLOR_WHITE );
+        sprintf(str, "H:%.2f\%", data[2]);
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, str, SSD_COLOR_WHITE );
+        sprintf(str, "I:%.2f", data[0]);
+        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, str, SSD_COLOR_WHITE );
         SSD1306_Update( &I2CDisplay );
 
     }   
@@ -372,7 +380,7 @@ void bmp280_read()
     // int ret = 0;
     while (1)
     {
-        vTaskDelay(15 * 1000  / portTICK_PERIOD_MS);
+        vTaskDelay(DELAY_SECOND * 1000  / portTICK_PERIOD_MS);
         if (bmp280_force_measurement(&dev_b) != ESP_OK)
         {
             printf("Force measurement failed\n");
@@ -397,7 +405,7 @@ void max44009_task()
     uint8_t lux_raw;
 	// infinite loop
     while (1) {
-        vTaskDelay(15 * 1000 / portTICK_PERIOD_MS);
+        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
         if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
         {
             printf("Temperature/pressure reading failed\n");
@@ -420,7 +428,7 @@ void ml8511_read()
     float outputVoltage, uvIntensity;
     while(1)
     {
-        vTaskDelay(59*1000 / portTICK_PERIOD_MS);
+        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
         gpio_set_level(GPIO_UV_EN, 1);
         vTaskDelay(100 / portTICK_PERIOD_MS);
 
@@ -448,7 +456,7 @@ void onenet_task(void *param)
 
    while(1) {
        vTaskDelay((unsigned long long)ONENET_PUB_INTERVAL* 1000 / portTICK_RATE_MS);
-        for (int i = 0; i < 6; ++i) {
+        for (int i = 0; i < 5; ++i) {
             sprintf(&buf[3], "{\"%s\":%.2f}", data_stream[i], data[i]);
             uint16_t len = strlen(&buf[3]);
             buf[0] = data_type_simple_json_without_time;
