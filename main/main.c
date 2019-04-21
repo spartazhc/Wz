@@ -698,10 +698,19 @@ void me3616_getevent(const char * data)
         else if (!strcmp(objid, "3325")) id = 5;
 
         if(!strcmp(resourceid, "5605")) {
-            printf("clear max&min in id:%s\n", objid);
+            printf("clear max & min in id: %s\n", objid);
             obj[id].max = obj[id].value;
-            obj[id].max = obj[id].value;
+            obj[id].min = obj[id].value;
             me3616_onenet_miplexecute_rsp(cmd, msgid, 2);
+            uart_sendstring(UART_NUM_1, cmd);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            // update 5601 & 5602 resource
+            me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                        obj[i].id, 5602, obj[i].max, 0);
+            uart_sendstring(UART_NUM_1, cmd);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
+            me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+            obj[i].id, 5601, obj[i].min, 0);
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
         }

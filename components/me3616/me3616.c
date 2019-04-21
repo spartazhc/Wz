@@ -136,7 +136,7 @@ char* me3616_onenet_miplread_rsp_float(char* dst, const char* msgid, const char*
 // +MIPLEXECUTE:0,22308,3303,0,5605,5, "reset"
 // AT+MIPLEXECUTERSP=0,22308,2
 char* me3616_onenet_miplexecute_rsp(char* dst, const char* msgid, int result){
-    sprintf(dst, "AT+MIPLEXEUTERSP=0,%s,%d\r\n", msgid, result);
+    sprintf(dst, "AT+MIPLEXECUTERSP=0,%s,%d\r\n", msgid, result);
     return dst;
 }
 
