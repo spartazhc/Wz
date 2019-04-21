@@ -705,12 +705,12 @@ void me3616_getevent(const char * data)
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             // update 5601 & 5602 resource
-            me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                        obj[i].id, 5602, obj[i].max, 0);
+            me3616_onenet_miplnotify_float(cmd, obj[id].msgid_observe,
+                        obj[id].id, 5602, obj[id].max, 0);
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
-            me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-            obj[i].id, 5601, obj[i].min, 0);
+            me3616_onenet_miplnotify_float(cmd, obj[id].msgid_observe,
+            obj[id].id, 5601, obj[id].min, 0);
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
         }
