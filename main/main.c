@@ -34,6 +34,8 @@
 #define GP2Y_DELTA_TIME     40
 #define GP2Y_SLEEP_TIME     9680
 
+#define UV_const        1025
+#define UPDATE_TIME     1
 // #define ME3616_GPS_MODE
 
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
@@ -81,7 +83,7 @@ void init_bme280();
 void init_max44009();
 void me3616_registered_to_onenet();
 void bmp280_read();
-void max44009_task();
+void max44009_read();
 void gp2y1014au0f_read();
 void ml8511_read();
 void me3616_getevent(const char * data);
@@ -114,10 +116,10 @@ void app_main()
     // initiate me3616 after start uart_forward task ()
     me3616_power_on();
     me3616_registered_to_onenet();
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
+    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
     // install ISR service with default configuration
 	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
@@ -364,8 +366,10 @@ void me3616_registered_to_onenet()
     vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,1\r\n");
     vTaskDelay(10 / portTICK_PERIOD_MS);
+#ifdef ME3616_GPS_MODE
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3336,1,\"1\",2,0\r\n");
     vTaskDelay(10 / portTICK_PERIOD_MS);
+#endif
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
@@ -376,59 +380,47 @@ void bmp280_read()
 {
     // float pressure=0, temperature=0, humidity=0;
     float data[3] = {0};
-    // int ret = 0;
-    while (1)
+    if (bmp280_force_measurement(&dev_b) != ESP_OK)
     {
-        vTaskDelay(20*1000  / portTICK_PERIOD_MS);
-        if (bmp280_force_measurement(&dev_b) != ESP_OK)
-        {
-            printf("Force measurement failed\n");
-            continue;
-        }
-        // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
-        if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
-        {
-            printf("Temperature/pressure reading failed\n");
-            continue;
-        }
+        printf("Force measurement failed\n");
+    }
+    // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+    if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
+    {
+        printf("Temperature/pressure reading failed\n");
+    }
 
-        printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
-        // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
-        if (me3616.discover_count >= ME3616_OBJ_NUM) {
-            /**
-             * obj[1]: temperature;
-             * obj[2]: humidity;
-             * obj[3]: pressure;
-             */
-            for (int i = 0; i < 3; ++i) {
-                // init max & min otherwise min will always be 0;
-                if (obj[i+1].max == 0 && obj[i+1].min == 0) {
-                    obj[i+1].max = data[i];
-                    obj[i+1].min = data[i];
-                }
-                // obj[i+1].value = data[i];
-                update_value(&obj[i+1], data[i]);
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
+    // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
+    if (me3616.discover_count >= ME3616_OBJ_NUM) {
+        /**
+         * obj[1]: temperature;
+         * obj[2]: humidity;
+         * obj[3]: pressure;
+         */
+        for (int i = 0; i < 3; ++i) {
+            // init max & min otherwise min will always be 0;
+            if (obj[i+1].max == 0 && obj[i+1].min == 0) {
+                obj[i+1].max = data[i];
+                obj[i+1].min = data[i];
             }
+            // obj[i+1].value = data[i];
+            update_value(&obj[i+1], data[i]);
         }
     }
 }
 
 // task  will react to button clicks
-void max44009_task() 
+void max44009_read() 
 {
     float lux_f = 0;
     uint8_t lux_raw;
-	// infinite loop
-    while (1) {
-        vTaskDelay(READ_DELAY * 1000 / portTICK_PERIOD_MS);
-        if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
-        {
-            printf("Temperature/pressure reading failed\n");
-            continue;
-        }
-        printf("Lux: %.3f\n", lux_f);
-        data[0] = lux_f;
+    if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
+    {
+        printf("Illuminance reading failed\n");
     }
+    printf("Lux: %.3f\n", lux_f);
+    update_value(&obj[0], lux_f);
 }
 
 
@@ -765,39 +757,35 @@ void gp2y1014au0f_read()
     int voltage;
     float dustDensity;
 
-    while(1)
-    {
-        vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_LED_CONTROL, 0);
-        // printf("GPIO_25 set low\n");
-        ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
-        
-        // printf("analog_read start\n");
-        voltage = analog_read(channel1);
-        // printf("analog_read end\n");
+    gpio_set_level(GPIO_LED_CONTROL, 0);
+    // printf("GPIO_25 set low\n");
+    ets_delay_us(GP2Y_SAMPLE_TIME); //delay microsecond 
+    
+    // printf("analog_read start\n");
+    voltage = analog_read(channel1);
+    // printf("analog_read end\n");
 
-        ets_delay_us(GP2Y_DELTA_TIME);
-        // printf("delay delta finished\n");
-        
-        gpio_set_level(GPIO_LED_CONTROL, 1);
-        // printf("GPIO_25 set high\n");
-        ets_delay_us(GP2Y_SLEEP_TIME);
+    ets_delay_us(GP2Y_DELTA_TIME);
+    // printf("delay delta finished\n");
+    
+    gpio_set_level(GPIO_LED_CONTROL, 1);
+    // printf("GPIO_25 set high\n");
+    ets_delay_us(GP2Y_SLEEP_TIME);
 
-        // printf("delay sleep finished\n");
+    // printf("delay sleep finished\n");
 
-        dustDensity = 0.17 * voltage / 1000 - 0.1;
+    dustDensity = 0.17 * voltage / 1000 - 0.1;
 
-        if (dustDensity < 0) dustDensity = 0;
-        // update value in object
-        // obj[5].value = dustDensity;
-        // init max & min otherwise min will always be 0;
-        if (obj[5].max == 0 && obj[5].min == 0) {
-            obj[5].max = dustDensity;
-            obj[5].min = dustDensity;
-        }
-        update_value(&obj[5], dustDensity);
-        printf("Dust Density: %.2f mg/m3\n", dustDensity);
+    if (dustDensity < 0) dustDensity = 0;
+    // update value in object
+    // obj[5].value = dustDensity;
+    // init max & min otherwise min will always be 0;
+    if (obj[5].max == 0 && obj[5].min == 0) {
+        obj[5].max = dustDensity;
+        obj[5].min = dustDensity;
     }
+    update_value(&obj[5], dustDensity);
+    printf("Dust Density: %.2f mg/m3\n", dustDensity);
 }
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
 {
@@ -809,31 +797,28 @@ void ml8511_read()
     int uvLevel;//, refLevel;
 
     float outputVoltage, uvIntensity;
-    while(1)
-    {
-        vTaskDelay(1*60*1000 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_UV_EN, 1);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
 
-        uvLevel = analog_read(channel2);
-        // printf("uvLevel = %d\n", uvLevel);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_UV_EN, 0);
+    gpio_set_level(GPIO_UV_EN, 1);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 
-        // outputVoltage = 3.3 / refLevel * uvLevel;
-        if (uvLevel <= 990) uvLevel = 990;
-        outputVoltage =  (float)uvLevel / 1000;
-        // printf("outputVoltage = %.2f\n", outputVoltage);
-        uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
-        // update value in object
-        // obj[4].value = uvIntensity;
-        if (obj[4].max == 0 && obj[4].min == 0) {
-            obj[4].max = uvIntensity;
-            obj[4].min = uvIntensity;
-        }
-        update_value(&obj[4], uvIntensity);
-        printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
+    uvLevel = analog_read(channel2);
+    // printf("uvLevel = %d\n", uvLevel);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    gpio_set_level(GPIO_UV_EN, 0);
+
+    // outputVoltage = 3.3 / refLevel * uvLevel;
+    if (uvLevel <= UV_const) uvLevel = UV_const;
+    outputVoltage =  (float)uvLevel / 1000;
+    // printf("outputVoltage = %.2f\n", outputVoltage);
+    uvIntensity = mapfloat(outputVoltage, UV_const / 1000.0, 2.9, 0.0, 15.0);
+    // update value in object
+    // obj[4].value = uvIntensity;
+    if (obj[4].max == 0 && obj[4].min == 0) {
+        obj[4].max = uvIntensity;
+        obj[4].min = uvIntensity;
     }
+    update_value(&obj[4], uvIntensity);
+    printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
 }
 
 void me3616_upload()
@@ -846,7 +831,7 @@ void me3616_upload()
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        vTaskDelay(1 * 60 * 1000 / portTICK_PERIOD_MS);
+        vTaskDelay(UPDATE_TIME * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
     #ifdef ME3616_GPS_MODE
         if (me3616.flag_gps == 1) {
@@ -864,9 +849,12 @@ void me3616_upload()
         if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
             me3616.upload_en = 1;
             printf("init success & upload enable\n");
-
         }
         if (me3616.flag_miplopen && me3616.upload_en) {
+            max44009_read();
+            bmp280_read();
+            ml8511_read();
+            gp2y1014au0f_read();
             for(size_t i = 0; i < ME3616_OBJ_NUM - 1; i++)
             {
                 // num_test += 1;
