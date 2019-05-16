@@ -41,7 +41,6 @@
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
 extern me3616_event_t me3616;
 extern bool flag_ok ;
-SemaphoreHandle_t xSemaphore = NULL;
 esp_err_t res;
 
 //bmp280 & max44009
@@ -57,12 +56,6 @@ static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
 // static const adc_channel_t channel3 = ADC_CHANNEL_4;     //GPIO32
 static const adc_atten_t atten = ADC_ATTEN_DB_11;
 static const adc_unit_t unit = ADC_UNIT_1;
-
-// interrupt service routine, called when the button is pressed
-void IRAM_ATTR max44009_isr_handler(void* arg) {
-    // notify the button task
-	xSemaphoreGiveFromISR(xSemaphore, NULL);
-}
 
 void uart_sendstring(uint8_t UART_NUM, char* str)
 {
@@ -100,8 +93,6 @@ float mapfloat(float x, float in_min, float in_max, float out_min, float out_max
 
 void app_main()
 {
-    // create the binary semaphore
-	xSemaphore = xSemaphoreCreateBinary();
     init_gpio();
     init_adc();
     init_uart();
@@ -116,15 +107,7 @@ void app_main()
     // initiate me3616 after start uart_forward task ()
     me3616_power_on();
     me3616_registered_to_onenet();
-    // xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(gp2y1014au0f_read, "gp2y1014au0f_read", configMINIMAL_STACK_SIZE * 8, NULL, 5, NULL, APP_CPU_NUM);
-    // xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
     xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
-    // install ISR service with default configuration
-	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
-	// attach the interrupt service routine
-	gpio_isr_handler_add(GPIO_INTR_IO, max44009_isr_handler, NULL);
 }
 
 
@@ -222,18 +205,6 @@ void init_gpio()
     io_conf.pull_down_en = 0;
     io_conf.pull_up_en = 1;
     gpio_config(&io_conf);
-    //enable interrupt as negedge
-    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
-    //set as input mode
-    io_conf.mode = GPIO_MODE_INPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = (1ULL << GPIO_INTR_IO);
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //enable pull-up mode
-    io_conf.pull_up_en = 1;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
 }
 
 void init_uart()
@@ -273,15 +244,11 @@ void init_bme280()
         printf("Could not init BMP280, err: %d\n", res);
         vTaskDelay(250 / portTICK_PERIOD_MS);
     }
-
-    // bool bme280p = dev.id == BME280_CHIP_ID;
-    // printf("BMP280: found %s\n", bme280p ? "BME280" : "BMP280");
 }
 
 void init_max44009()
 {
     max44009_init_auto_params(&params_m);   
-    // dev_m.i2c_dev = dev_b.i2c_dev;
     while (max44009_init_desc(&dev_m, MAX44009_I2C_ADDRESS_0, 0, SDA_GPIO, SCL_GPIO) != ESP_OK)
     {
         printf("Could not init device descriptor\n");
@@ -391,7 +358,6 @@ void bmp280_read()
     }
 
     printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
-    // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
     if (me3616.discover_count >= ME3616_OBJ_NUM) {
         /**
          * obj[1]: temperature;
