@@ -35,7 +35,7 @@
 #define GP2Y_SLEEP_TIME     9680
 
 #define UV_const        1025
-#define UPDATE_TIME     1
+#define UPDATE_TIME     5
 // #define ME3616_GPS_MODE
 
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
@@ -333,10 +333,10 @@ void me3616_registered_to_onenet()
     vTaskDelay(10 / portTICK_PERIOD_MS);
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3325,1,\"1\",3,1\r\n");
     vTaskDelay(10 / portTICK_PERIOD_MS);
-#ifdef ME3616_GPS_MODE
+// #ifdef ME3616_GPS_MODE
     uart_sendstring(UART_NUM_1, "AT+MIPLADDOBJ=0,3336,1,\"1\",2,0\r\n");
     vTaskDelay(10 / portTICK_PERIOD_MS);
-#endif
+// #endif
     // 注册onenet 平台  这一步比较费时间，要多delay
     uart_sendstring(UART_NUM_1, "AT+MIPLOPEN=0,3600\r\n");
     while (!me3616.flag_miplopen){vTaskDelay(100 / portTICK_PERIOD_MS);}
@@ -797,7 +797,6 @@ void me3616_upload()
     printf("nbiot_upload task start!\n");
     while(1){
         // vTaskDelay(5000 / portTICK_PERIOD_MS);
-        vTaskDelay(UPDATE_TIME * 60 * 1000 / portTICK_PERIOD_MS);
         max_count++;
     #ifdef ME3616_GPS_MODE
         if (me3616.flag_gps == 1) {
@@ -851,6 +850,6 @@ void me3616_upload()
                 }
             }
         }
-
+        vTaskDelay(UPDATE_TIME * 60 * 1000 / portTICK_PERIOD_MS);
     }
 }
