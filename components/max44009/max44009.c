@@ -102,6 +102,20 @@ esp_err_t max44009_init_default_params(max44009_params_t *params)
     return ESP_OK;
 }
 
+esp_err_t max44009_init_auto_params(max44009_params_t *params)
+{
+    CHECK_ARG(params);
+
+    params->int_enable = MAX44009_INT_DISABLE;
+    params->mode = MAX44009_MODE_DEFAULT;
+    params->manual = MAX44009_MANUAL_DISABLE;
+    params->cdr = MAX44009_CDR_DISABLE;
+    params->integ_time = MAX44009_INTEGRATION_800;
+    params->eth_h = MAX44009_TH_1110;   /* not important */
+    params->eth_l = MAX44009_TH_0000;
+    return ESP_OK;
+}
+
 esp_err_t max44009_init(max44009_t *dev, max44009_params_t *params)
 {
     CHECK_ARG(dev);

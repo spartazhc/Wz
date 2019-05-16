@@ -135,7 +135,7 @@ esp_err_t max44009_free_desc(max44009_t *dev);
  */
 esp_err_t max44009_init_default_params(max44009_params_t *params);
 
-
+esp_err_t max44009_init_auto_params(max44009_params_t *params);
 /**
  * Initialize MAX44009 module, probes for the device, soft resets the device,
  * reads the calibration constants, and configures the device using the supplied
