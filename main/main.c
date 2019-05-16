@@ -278,7 +278,7 @@ void init_bme280()
 
 void init_max44009()
 {
-    max44009_init_default_params(&params_m);   
+    max44009_init_auto_params(&params_m);   
     // dev_m.i2c_dev = dev_b.i2c_dev;
     while (max44009_init_desc(&dev_m, MAX44009_I2C_ADDRESS_0, 0, SDA_GPIO, SCL_GPIO) != ESP_OK)
     {
@@ -296,16 +296,9 @@ void init_max44009()
     uint8_t lux_raw;
     if (max44009_read_float(&dev_m, &lux, &lux_raw) != ESP_OK)
     {
-        printf("Temperature/pressure reading failed\n");
+        printf("Max44009 reading failed\n");
     }
     printf("init Lux: %.3f\n", lux);
-    // init max & min
-    obj[0].max = lux;
-    obj[0].min = lux;
-    if (max44009_set_threshold_etc(&dev_m, &params_m, lux, lux_raw) != ESP_OK)
-    {
-        printf("Threshold setting failed\n");
-    }
 }
 
 void me3616_registered_to_onenet()
@@ -423,44 +416,20 @@ void bmp280_read()
 // task  will react to button clicks
 void max44009_task() 
 {
-	uint8_t intr_status;
     float lux_f = 0;
     uint8_t lux_raw;
 	// infinite loop
-	for(;;) {
-		// wait for the notification from the ISR
-		if(xSemaphoreTake(xSemaphore,portMAX_DELAY) == pdTRUE) {
-            // read the ints bit to confirm
-            // printf("xSemaphore: %d\n", (int)xSemaphore);
-            // printf("read intr_status\n");
-			i2c_dev_read_reg(&dev_m.i2c_dev, 0x00, &intr_status, 1);
-            printf("intr_status: %x\n", intr_status);
-            if (intr_status == 1) {
-                /**max44009 caused the interrupt
-                 * 1. read max44009 amibient lux
-                 * 2. write upper/lower lux threshold and 
-                 *      threshold  timer registers
-                 * 3. wait until next hardware interrupt
-                 */
-                if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
-                {
-                    printf("Temperature/pressure reading failed\n");
-                    continue;
-                }
-                printf("Lux: %.3f\n", lux_f);
-                // update value in object
-                // obj[0].value = lux_f;
-                update_value(&obj[0], lux_f);
-                if (max44009_set_threshold_etc(&dev_m, &params_m, lux_f, lux_raw) != ESP_OK)
-                {
-                    printf("Threshold setting failed\n");
-                    continue;
-                }
-            }
-		}
-	}
+    while (1) {
+        vTaskDelay(READ_DELAY * 1000 / portTICK_PERIOD_MS);
+        if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
+        {
+            printf("Temperature/pressure reading failed\n");
+            continue;
+        }
+        printf("Lux: %.3f\n", lux_f);
+        data[0] = lux_f;
+    }
 }
-
 
 
 /**
