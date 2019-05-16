@@ -742,7 +742,7 @@ void me3616_getevent(const char * data)
             // printf("itmp=%d\n", itmp);
             obj[6].min = itmp + (lon - itmp*100)/60;
             // printf("sLatitude: %s, sLongitude: %s\n", objid, msgid);
-            printf("Latitude: %.8f, Longitude: %.8f\n", obj[6].max, obj[6].min);
+            printf("Longitude: %.8f, Latitude: %.8f\n", obj[6].max, obj[6].min);
             me3616.flag_gps = 1;
         }
         return;
@@ -882,11 +882,11 @@ void me3616_upload()
     #ifdef ME3616_GPS_MODE
         if (me3616.flag_gps == 1) {
             me3616_onenet_miplnotify_gps(cmd, obj[6].msgid_observe,
-                        obj[6].id, 5514, obj[6].max, 0);//max place latitude
+                        obj[6].id, 5515, obj[6].max, 0);//max place longitude
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616_onenet_miplnotify_gps(cmd, obj[6].msgid_observe,
-                        obj[6].id, 5515, obj[6].min, 0);//min place longitude
+                        obj[6].id, 5514, obj[6].min, 0);//min place latitude
             uart_sendstring(UART_NUM_1, cmd);
             vTaskDelay(100 / portTICK_PERIOD_MS);
             me3616.flag_gps = 0;
