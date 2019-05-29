@@ -35,7 +35,7 @@
 #define GP2Y_SLEEP_TIME     9680
 
 #define UV_const        1025
-#define UPDATE_TIME     5
+#define UPDATE_TIME     1
 // #define ME3616_GPS_MODE
 
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
@@ -83,6 +83,7 @@ void me3616_getevent(const char * data);
 void me3616_response(const char * data);
 void uart_forward();
 void me3616_upload();
+void sensor_test();
 static void check_efuse();
 static void print_char_val_type(esp_adc_cal_value_t val_type);
 uint32_t analog_read(adc_channel_t channel);
@@ -95,8 +96,8 @@ void app_main()
 {
     init_gpio();
     init_adc();
-    init_uart();
-    xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
+    // init_uart();
+    // xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
     while (i2cdev_init() != ESP_OK)
     {
         printf("Could not init I2Cdev library\n");
@@ -104,12 +105,22 @@ void app_main()
     }
     init_bme280();
     init_max44009();
+    sensor_test();
     // initiate me3616 after start uart_forward task ()
-    me3616_power_on();
-    me3616_registered_to_onenet();
-    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
+    // me3616_power_on();
+    // me3616_registered_to_onenet();
+    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
 }
 
+void sensor_test() {
+    while(1) {
+        max44009_read();
+        bmp280_read();
+        // ml8511_read();
+        // gp2y1014au0f_read();
+        vTaskDelay(10 * 1000 / portTICK_PERIOD_MS);
+    }
+}
 
 static void check_efuse()
 {
@@ -244,6 +255,33 @@ void init_bme280()
         printf("Could not init BMP280, err: %d\n", res);
         vTaskDelay(250 / portTICK_PERIOD_MS);
     }
+
+    float data[3] = {0};
+    if (bmp280_force_measurement(&dev_b) != ESP_OK)
+    {
+        printf("Force measurement failed\n");
+    }
+    // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+    if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
+    {
+        printf("Temperature/pressure reading failed\n");
+    }
+
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
+    vTaskDelay(250 / portTICK_PERIOD_MS);
+
+    if (bmp280_force_measurement(&dev_b) != ESP_OK)
+    {
+        printf("Force measurement failed\n");
+    }
+    // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+    if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
+    {
+        printf("Temperature/pressure reading failed\n");
+    }
+
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[0], data[1], data[2]);
+    
 }
 
 void init_max44009()
@@ -351,7 +389,7 @@ void bmp280_read()
     {
         printf("Force measurement failed\n");
     }
-    // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+    vTaskDelay(100 / portTICK_PERIOD_MS);
     if (bmp280_read_float(&dev_b, &data[0], &data[2], &data[1]) != ESP_OK)
     {
         printf("Temperature/pressure reading failed\n");
@@ -531,6 +569,10 @@ void me3616_getevent(const char * data)
                 }
                 uart_sendstring(UART_NUM_1, cmd);
                 me3616.discover_count++;
+                if (me3616.discover_count == ME3616_OBJ_NUM) {
+                    printf("init success & upload enable\n");
+                    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
+                }
                 vTaskDelay(100 / portTICK_PERIOD_MS);
                 break;
             }
@@ -811,42 +853,35 @@ void me3616_upload()
             me3616.flag_gps = 0;
         }
     #endif
-        if (!me3616.upload_en && me3616.discover_count == ME3616_OBJ_NUM) {
-            me3616.upload_en = 1;
-            printf("init success & upload enable\n");
+        max44009_read();
+        bmp280_read();
+        ml8511_read();
+        gp2y1014au0f_read();
+        for(size_t i = 0; i < ME3616_OBJ_NUM - 1; i++) {
+            // num_test += 1;
+            // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
+            float2char(obj[i].value, buf);
+            me3616_onenet_miplnotify(cmd, obj[i].msgid_observe, obj[i].id,
+                5700, 4, buf, 0);
+            uart_sendstring(UART_NUM_1, cmd);
+            vTaskDelay(100 / portTICK_PERIOD_MS);
         }
-        if (me3616.flag_miplopen && me3616.upload_en) {
-            max44009_read();
-            bmp280_read();
-            ml8511_read();
-            gp2y1014au0f_read();
-            for(size_t i = 0; i < ME3616_OBJ_NUM - 1; i++)
-            {
-                // num_test += 1;
-                // AT+MIPLNOTIFY=0,114453,3303,0,5700,4,4,25.1,0,0
-                float2char(obj[i].value, buf);
-                me3616_onenet_miplnotify(cmd, obj[i].msgid_observe, obj[i].id,
-                 5700, 4, buf, 0);
-                uart_sendstring(UART_NUM_1, cmd);
-                vTaskDelay(100 / portTICK_PERIOD_MS);
-            }
-            if (max_count == 10) {
-                max_count = 0; // reset counter
-                for (int i = 0; i < ME3616_OBJ_NUM - 1; ++i) { 
-                    if (obj[i].max_flag) { // max
-                        obj[i].max_flag = 0;
-                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                        obj[i].id, 5602, obj[i].max, 0);
-                        uart_sendstring(UART_NUM_1, cmd);
-                        vTaskDelay(100 / portTICK_PERIOD_MS);
-                    }
-                    if (obj[i].min_flag) { // min
-                        obj[i].min_flag = 0;
-                        me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
-                        obj[i].id, 5601, obj[i].min, 0);
-                        uart_sendstring(UART_NUM_1, cmd);
-                        vTaskDelay(100 / portTICK_PERIOD_MS);
-                    }
+        if (max_count == 10) {
+            max_count = 0; // reset counter
+            for (int i = 0; i < ME3616_OBJ_NUM - 1; ++i) { 
+                if (obj[i].max_flag) { // max
+                    obj[i].max_flag = 0;
+                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                    obj[i].id, 5602, obj[i].max, 0);
+                    uart_sendstring(UART_NUM_1, cmd);
+                    vTaskDelay(100 / portTICK_PERIOD_MS);
+                }
+                if (obj[i].min_flag) { // min
+                    obj[i].min_flag = 0;
+                    me3616_onenet_miplnotify_float(cmd, obj[i].msgid_observe,
+                    obj[i].id, 5601, obj[i].min, 0);
+                    uart_sendstring(UART_NUM_1, cmd);
+                    vTaskDelay(100 / portTICK_PERIOD_MS);
                 }
             }
         }
