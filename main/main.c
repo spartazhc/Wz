@@ -220,7 +220,7 @@ void display_task() {
         SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, str, SSD_COLOR_WHITE );
         sprintf(str, "UV:%.2f", data[4]);
         SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, str, SSD_COLOR_WHITE );
-        sprintf(str, "H:%.2f\%", data[2]);
+        sprintf(str, "H:%.2f", data[2]);
         SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, str, SSD_COLOR_WHITE );
         sprintf(str, "I:%.2f", data[0]);
         SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, str, SSD_COLOR_WHITE );
