@@ -35,7 +35,7 @@
 #define GP2Y_SLEEP_TIME     9680
 
 #define UV_const        1025
-#define UPDATE_TIME     1
+#define UPDATE_TIME     5
 // #define ME3616_GPS_MODE
 
 extern me3616_obj_t obj[ME3616_OBJ_NUM];
@@ -96,8 +96,8 @@ void app_main()
 {
     init_gpio();
     init_adc();
-    // init_uart();
-    // xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
+    init_uart();
+    xTaskCreatePinnedToCore(uart_forward, "uart_forward", 1024 *8, NULL, 10, NULL,1);
     while (i2cdev_init() != ESP_OK)
     {
         printf("Could not init I2Cdev library\n");
@@ -105,11 +105,11 @@ void app_main()
     }
     init_bme280();
     init_max44009();
-    sensor_test();
+    // sensor_test();
     // initiate me3616 after start uart_forward task ()
-    // me3616_power_on();
-    // me3616_registered_to_onenet();
-    // xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
+    me3616_power_on();
+    me3616_registered_to_onenet();
+    xTaskCreatePinnedToCore(me3616_upload, "me3616_upload", configMINIMAL_STACK_SIZE * 8, NULL, 9, NULL, 1);
 }
 
 void sensor_test() {
