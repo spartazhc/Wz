@@ -57,6 +57,7 @@ struct SSD1306_Device I2CDisplay;
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
 
+#define UV_const        1019
 #define DELAY_SECOND    5
 static bool onenet_initialised = false;
 static TaskHandle_t xOneNetTask = NULL;
@@ -438,10 +439,10 @@ void ml8511_read()
         gpio_set_level(GPIO_UV_EN, 0);
 
         // outputVoltage = 3.3 / refLevel * uvLevel;
-        if (uvLevel <= 990) uvLevel = 990;
+        if (uvLevel <= UV_const) uvLevel = UV_const;
         outputVoltage =  (float)uvLevel / 1000;
         // printf("outputVoltage = %.2f\n", outputVoltage);
-        uvIntensity = mapfloat(outputVoltage, 0.99, 2.9, 0.0, 15.0);
+        uvIntensity = mapfloat(outputVoltage, UV_const / 1000.0, 2.9, 0.0, 15.0);
         
         data[4] = uvIntensity;
         printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
