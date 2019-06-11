@@ -42,7 +42,11 @@
 #include "ssd1306_draw.h"
 #include "ssd1306_font.h"
 #include "ssd1306_default_if.h"
-
+// weather app
+#include <cJSON.h>
+#include "app_config.h"
+#include "app_http.h"
+#include "app_rest.h"
 // ssd 1306
 static const int I2CDisplayAddress = 0x3C;
 static const int I2CDisplayWidth = 128;
@@ -52,7 +56,9 @@ struct SSD1306_Device I2CDisplay;
 // GPIO
 #define SDA_GPIO 18
 #define SCL_GPIO 19
-#define GPIO_UV_EN          0
+#define GPIO_UV_EN          15
+#define GPIO_INTR           0
+#define ESP_INTR_FLAG_DEFAULT 0
 // adc 
 #define DEFAULT_VREF        1100        //Use adc2_vref_to_gpio() to obtain a better estimate
 #define NO_OF_SAMPLES       1          //Multisampling
@@ -69,6 +75,8 @@ bmp280_params_t params_b;
 max44009_params_t params_m;
 bmp280_t dev_b;
 max44009_t dev_m;
+uint8_t display_status = 0;
+uint8_t button_tmp = 0;
 
 const char* data_stream[6] = {"illuminance", "temperature", "humidity", "pressure", 
                          "ultraviolet", "dustDensity"};
@@ -91,7 +99,7 @@ void init_gpio();
 void init_bme280();
 void init_max44009();
 void bmp280_read();
-void max44009_task();
+void max44009_read();
 void ml8511_read();
 void display_task();
 static void check_efuse();
@@ -99,6 +107,33 @@ static void print_char_val_type(esp_adc_cal_value_t val_type);
 uint32_t analog_read(adc_channel_t channel);
 void init_adc();
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max);
+
+SemaphoreHandle_t xSemaphore = NULL;
+TaskHandle_t xHandle;
+// interrupt service routine, called when the button is pressed
+void IRAM_ATTR button_isr_handler(void* arg) {
+    // notify the button task
+	xSemaphoreGiveFromISR(xSemaphore, NULL);
+}
+// task that will react to button clicks
+void button_task(void* arg) {
+	
+	// infinite loop
+	for(;;) {
+		// wait for the notification from the ISR
+		if(xSemaphoreTake(xSemaphore,portMAX_DELAY) == pdTRUE) {
+			printf("Button pressed!\n");
+            button_tmp++;
+            if (button_tmp >= 2) {
+                button_tmp = 0;
+                display_status++;
+                if (display_status >= 3) display_status = 0;
+                vTaskDelete( xHandle );
+                xTaskCreate(&display_task, "display_task", 8192, NULL, 5, &xHandle);
+            }
+		}
+	}
+}
 
 bool DefaultBusInit( void ) {
     assert( SSD1306_I2CMasterInitDefault( ) == true );
@@ -175,15 +210,18 @@ mqtt_settings settings = {
 
 void app_main()
 {
-    // esp_err_t ret = nvs_flash_init();
-    // if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
-    // {
-    //     ESP_ERROR_CHECK(nvs_flash_erase());
-    //     ret = nvs_flash_init();
-    // }
-    // ESP_ERROR_CHECK(ret);
+    // create the binary semaphore
+	xSemaphore = xSemaphoreCreateBinary();
 
-    // wifi_conn_init();
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    wifi_conn_init();
     init_gpio();
     init_adc();
     
@@ -197,36 +235,99 @@ void app_main()
 
     if ( DefaultBusInit( ) == true ) {
         printf( "I2C Display Bus Init lookin good...\n" );
-        xTaskCreate(&display_task, "display_task", 8192, NULL, 5, NULL);
+        xTaskCreate(&display_task, "display_task", 8192, NULL, 5, &xHandle);
     } else printf( "Failed to init display ...\n" );
 
-    
-    xTaskCreatePinnedToCore(bmp280_read, "bmp280_read", configMINIMAL_STACK_SIZE * 8, NULL, 7, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(max44009_task, "max44009_task", configMINIMAL_STACK_SIZE * 8, NULL, 8, NULL, APP_CPU_NUM);
-    xTaskCreatePinnedToCore(ml8511_read, "ml8511_read", configMINIMAL_STACK_SIZE * 8, NULL, 6, NULL, APP_CPU_NUM);
+     // start the task that will handle the button
+	xTaskCreate(button_task, "button_task", 2048, NULL, 10, NULL);
+	// install ISR service with default configuration
+	gpio_install_isr_service(ESP_INTR_FLAG_DEFAULT);
+	// attach the interrupt service routine
+	gpio_isr_handler_add(GPIO_INTR, button_isr_handler, NULL);
 }
-
-// const char* data_stream[6] = {"illuminance", "temperature", "humidity", "pressure", 
-//                          "ultraviolet", "dustDensity"};
 
 void display_task() {
     
     while (1) {
-        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
-        // clear LCD, and select font 1
-        SSD1306_Clear( &I2CDisplay, SSD_COLOR_BLACK );
-        SSD1306_SetFont( &I2CDisplay, &Font_droid_sans_mono_7x13);
-        char str[20];
-        sprintf(str, "T:%.2fC", data[1]);
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, str, SSD_COLOR_WHITE );
-        sprintf(str, "UV:%.2f", data[4]);
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, str, SSD_COLOR_WHITE );
-        sprintf(str, "H:%.2f", data[2]);
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, str, SSD_COLOR_WHITE );
-        sprintf(str, "I:%.2f", data[0]);
-        SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, str, SSD_COLOR_WHITE );
-        SSD1306_Update( &I2CDisplay );
+        printf("display_status = %d\n", display_status);
+        if (display_status < 2) {
+            bmp280_read();
+            max44009_read();
+            ml8511_read();
 
+            SSD1306_Clear( &I2CDisplay, SSD_COLOR_BLACK );
+            SSD1306_SetFont( &I2CDisplay, &Font_droid_sans_mono_7x13);
+            
+            char str[20];
+            sprintf(str, "T:%.2fC", data[1]);
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, str, SSD_COLOR_WHITE );
+            sprintf(str, "UV:%.2f", data[4]);
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, str, SSD_COLOR_WHITE );
+            sprintf(str, "H:%.2f%%", data[2]);
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, str, SSD_COLOR_WHITE );
+            sprintf(str, "I:%.2f", data[0]);
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, str, SSD_COLOR_WHITE );
+            SSD1306_Update( &I2CDisplay );
+            if (display_status == 0) {
+                vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
+            } else {
+                vTaskDelay(1 * 1000 / portTICK_PERIOD_MS);
+            }
+        } else {
+            /** openweather API response 
+             * {"coord":{"lon":139,"lat":35},
+                "sys":{"country":"JP","sunrise":1369769524,"sunset":1369821049},
+                "weather":[{"id":804,"main":"clouds","description":"overcast clouds","icon":"04n"}],
+                "main":{"temp":289.5,"humidity":89,"pressure":1013,"temp_min":287.04,"temp_max":292.04},
+                "wind":{"speed":7.31,"deg":187.002},
+                "rain":{"3h":0},
+                "clouds":{"all":92},
+                "dt":1369824698,
+                "id":1851632,
+                "name":"Shuzenji",
+                "cod":200}
+             */
+            app_rest_fetch();
+            // Using cJSON, parse retrieved JSON string into human readable weather data
+            cJSON *root = cJSON_Parse(http_json_message);
+
+            cJSON *_main = cJSON_GetObjectItem(root,"main");
+            cJSON *_weather = cJSON_GetObjectItem(root,"weather");
+            cJSON *_zero = cJSON_GetArrayItem(_weather, 0);
+
+            char *city = cJSON_GetObjectItem(root,"name")->valuestring;
+            double temp = cJSON_GetObjectItem(_main, "temp")->valuedouble;
+            int humidity = cJSON_GetObjectItem(_main, "humidity")->valueint;
+            char *description = cJSON_GetObjectItem(_zero, "description")->valuestring;
+
+            char city_buf[32];
+            char temp_buf[32];
+            char hum_buf[32];
+
+            // display parsed data on terminal for debugging purposes. OPTIONAL
+            printf("\nCity: %s", city);
+            printf("\nTemperature: %.0lf C", temp);
+            printf("\nHumidity: %d %%", humidity);
+            printf("\nDescription: %s\n", description);
+
+            // format parsed data into 'pretty' strings to display on LCD
+            if (strlen(description) >= 10) {
+                sprintf(city_buf, "SH");
+            } else {
+                sprintf(city_buf, "%s", city);
+            }
+            sprintf(temp_buf, "T:%.0lf C", temp);
+            sprintf(hum_buf, "H:%d %%", humidity);
+
+            SSD1306_Clear( &I2CDisplay, SSD_COLOR_BLACK );
+            SSD1306_SetFont( &I2CDisplay, &Font_droid_sans_mono_7x13);
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthWest, city_buf, SSD_COLOR_WHITE );
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_NorthEast, description, SSD_COLOR_WHITE );
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthWest, temp_buf, SSD_COLOR_WHITE );
+            SSD1306_FontDrawAnchoredString( &I2CDisplay, TextAnchor_SouthEast, hum_buf, SSD_COLOR_WHITE );
+            SSD1306_Update( &I2CDisplay );
+            vTaskDelay(15 * 60 * 1000 / portTICK_PERIOD_MS);
+        }
     }   
 
 }
@@ -306,8 +407,8 @@ void init_adc()
 
 /**
  * init gpio
- * GPIO_INTR_IO         | max44009 
- * GPIO_LED_CONTROL     | gp2y1014au
+ * GPIO_INTR       | button
+ * GPIO_UV_EN      | ml8511 enable
  */
 void init_gpio()
 {
@@ -319,10 +420,19 @@ void init_gpio()
     io_conf.pull_down_en = 1;
     io_conf.pull_up_en = 0;
     gpio_config(&io_conf);
+
+    io_conf.intr_type = GPIO_PIN_INTR_NEGEDGE;
+    //set as output mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //bit mask of the pins that you want to set,e.g.GPIO18/19
+    io_conf.pin_bit_mask = (1ULL << GPIO_INTR);
+    //disable pull-down mode
+    io_conf.pull_down_en = 0;
+    //enable pull-up mode
+    io_conf.pull_up_en = 1;
+    //configure GPIO with the given settings
+    gpio_config(&io_conf);
 }
-
-
-
 
 void init_bme280()
 {
@@ -377,44 +487,32 @@ void init_max44009()
 
 void bmp280_read()
 {
-    // float pressure=0, temperature=0, humidity=0;
-    // int ret = 0;
-    while (1)
+    if (bmp280_force_measurement(&dev_b) != ESP_OK)
     {
-        vTaskDelay(DELAY_SECOND * 1000  / portTICK_PERIOD_MS);
-        if (bmp280_force_measurement(&dev_b) != ESP_OK)
-        {
-            printf("Force measurement failed\n");
-            continue;
-        }
-        // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
-        if (bmp280_read_float(&dev_b, &data[1], &data[3], &data[2]) != ESP_OK)
-        {
-            printf("Temperature/pressure reading failed\n");
-            continue;
-        }
-
-        printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[1], data[2], data[3]);
-        // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
+        printf("Force measurement failed\n");
     }
+    // if (bmp280_read_float(&dev_b, &temperature, &pressure, &humidity) != ESP_OK)
+    if (bmp280_read_float(&dev_b, &data[1], &data[3], &data[2]) != ESP_OK)
+    {
+        printf("Temperature/pressure reading failed\n");
+    }
+
+    printf("Temp: %.2f C, Hum: %.2f%%, Pres: %.2f Pa\n", data[1], data[2], data[3]);
+    // printf("Pressure: %.2f Pa, Temperature: %.2f C, Humidity: %.2f%%\n", pressure, temperature, humidity);
 }
 
 // task  will react to button clicks
-void max44009_task() 
+void max44009_read() 
 {
     float lux_f = 0;
     uint8_t lux_raw;
-	// infinite loop
-    while (1) {
-        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
-        if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
-        {
-            printf("Temperature/pressure reading failed\n");
-            continue;
-        }
-        printf("Lux: %.3f\n", lux_f);
-        data[0] = lux_f;
+    
+    if (max44009_read_float(&dev_m, &lux_f, &lux_raw) != ESP_OK)
+    {
+        printf("Illuminance reading failed\n");
     }
+    printf("Lux: %.3f\n", lux_f);
+    data[0] = lux_f;
 }
 
 float mapfloat(float x, float in_min, float in_max, float out_min, float out_max)
@@ -425,28 +523,24 @@ float mapfloat(float x, float in_min, float in_max, float out_min, float out_max
 void ml8511_read()
 {
     int uvLevel;//, refLevel;
-
     float outputVoltage, uvIntensity;
-    while(1)
-    {
-        vTaskDelay(DELAY_SECOND * 1000 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_UV_EN, 1);
-        vTaskDelay(100 / portTICK_PERIOD_MS);
 
-        uvLevel = analog_read(channel2);
-        // printf("uvLevel = %d\n", uvLevel);
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-        gpio_set_level(GPIO_UV_EN, 0);
+    gpio_set_level(GPIO_UV_EN, 1);
+    vTaskDelay(100 / portTICK_PERIOD_MS);
 
-        // outputVoltage = 3.3 / refLevel * uvLevel;
-        if (uvLevel <= UV_const) uvLevel = UV_const;
-        outputVoltage =  (float)uvLevel / 1000;
-        // printf("outputVoltage = %.2f\n", outputVoltage);
-        uvIntensity = mapfloat(outputVoltage, UV_const / 1000.0, 2.9, 0.0, 15.0);
-        
-        data[4] = uvIntensity;
-        printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
-    }
+    uvLevel = analog_read(channel2);
+    // printf("uvLevel = %d\n", uvLevel);
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    gpio_set_level(GPIO_UV_EN, 0);
+
+    // outputVoltage = 3.3 / refLevel * uvLevel;
+    if (uvLevel <= UV_const) uvLevel = UV_const;
+    outputVoltage =  (float)uvLevel / 1000;
+    // printf("outputVoltage = %.2f\n", outputVoltage);
+    uvIntensity = mapfloat(outputVoltage, UV_const / 1000.0, 2.9, 0.0, 15.0);
+    
+    data[4] = uvIntensity;
+    printf("UV Intensity: %.2f mw/cm^2\n", uvIntensity);
 }
 
 void onenet_task(void *param)
@@ -457,6 +551,11 @@ void onenet_task(void *param)
 
    while(1) {
        vTaskDelay((unsigned long long)ONENET_PUB_INTERVAL* 1000 / portTICK_RATE_MS);
+       if (display_status == 2) {   // 需要再读一下传感器数值
+            bmp280_read();
+            max44009_read();
+            ml8511_read();
+       }
         for (int i = 0; i < 5; ++i) {
             sprintf(&buf[3], "{\"%s\":%.2f}", data_stream[i], data[i]);
             uint16_t len = strlen(&buf[3]);
