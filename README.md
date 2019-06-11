@@ -4,8 +4,8 @@ A crowd-source mobile weather station based on esp32 and me3616.
 
 we produced 2 versions:
 
-- **Wz-Pro** NBiot + LWM2M version: powerfull
-- **Wz-mini** WiFi + MQTT version: tiny and convenient
+- **Wz-Pro** (NBiot + LWM2M version): powerfull
+- **Wz-mini** (WiFi + MQTT version): tiny and convenient
 
 | components | NBiot + LWM2M | WiFi + MQTT    |
 | ---------- | ------------- | -------------- |
@@ -18,7 +18,7 @@ we produced 2 versions:
 
 ### Hardware chips
 
-- MCU: ESP32-DEVKITC-V3 (ESP32-WROOM-32D)
+- MCU: ESP32-WROOM-32D
 - NBiot: ME3616 G1A
 
 ### Sensors
