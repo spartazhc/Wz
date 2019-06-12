@@ -4,7 +4,7 @@ A crowd-source mobile weather station based on esp32 and me3616.
 
 we produced 2 versions:
 
-- **Wz-Pro** (NBiot + LWM2M version): powerfull
+- **Wz-Pro** (NBiot + LWM2M version): powerful
 - **Wz-mini** (WiFi + MQTT version): tiny and convenient
 
 | components | NBiot + LWM2M | WiFi + MQTT    |
